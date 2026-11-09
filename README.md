@@ -12,9 +12,9 @@ That starts a bridge on a free localhost port, runs `claude` against it on `clau
 
 Probably not. Check these first:
 
-1. GitHub's own Copilot CLI. Native client, needs nothing extra.
-2. If you do not like the Copilot CLI, use [opencode](https://opencode.ai). GitHub has supported Copilot login in opencode officially since January 2026: run `opencode auth login`, pick GitHub Copilot, and every Copilot model shows up as `github-copilot/...`. I run opencode 2.2.6 that way. It talks to Copilot directly, not through the SDK this repo uses, so the GPT result-pairing problem below does not apply. Quick test with gpt-6-luna: it paired parallel tool results correctly 3 of 3 times. This is the setup I'd recommend.
-3. This repo is for people who want Claude Code itself on Copilot models, and nothing else will do.
+1. GitHub's own Copilot CLI. It has gotten a lot better the last six months, and I have no problem at all using it instead of Claude Code. Native client, needs nothing extra.
+2. If you do not like the Copilot CLI, use [opencode](https://opencode.ai). GitHub has officially supported Copilot login in opencode since January 2026: run `opencode auth login`, pick GitHub Copilot, and every Copilot model shows up as `github-copilot/...`. I run opencode 2.2.6 that way. It talks to Copilot directly, not through the SDK this repo uses, so the GPT result-pairing problem below does not apply. Quick test with gpt-6-luna: it paired parallel tool results correctly 3 of 3 times. This is the setup I'd recommend.
+3. This repo is for people who will NOT use the Copilot CLI or opencode, and want Claude Code itself on Copilot models.
 
 ## Why
 
