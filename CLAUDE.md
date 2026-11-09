@@ -59,22 +59,3 @@ runtime and spends AI credits. A change to `bridge.py` is validated by a
   something fails, with the numbers.
 - Code style: flat control flow, named intermediates, fail loud, log the
   intention before the action, `file:line` on every log line.
-
-## Pending: Windows Sandbox test (set up 2026-11-09)
-
-The owner enabled Windows Sandbox (`Containers-DisposableClientVM`) and
-rebooted. Nothing below has been run yet. On the next session:
-
-1. Confirm Sandbox is on: `Test-Path $env:windir\System32\WindowsSandbox.exe`.
-2. `.\tests\sandbox\make-wsb.ps1` opens a sandbox with the repo copied to
-   `C:\cuckoos-nest`. The owner drives the sandbox; ask for the window text.
-3. `install-windows.bat` with no winget: expect "winget not found", exit 1.
-4. `C:\tests\bootstrap-winget.cmd`, new terminal, `install-windows.bat`
-   again. Check each winget prompt (PowerShell 7, uv, Claude Code, Copilot
-   CLI), the stale-PATH handling (continues via full path for pwsh and uv,
-   asks for a new window otherwise), `uv sync`, and `copilot login`.
-5. New terminal, `C:\cuckoos-nest\claude-copilot.cmd -p "Reply READY."`,
-   then one interactive session with a tool call.
-6. Record results in `STATUS.md` (replace the install-windows.bat bullet and
-   the Testing section's "not run yet" in README.md). Anything that breaks
-   goes in `TODONT.md` with the window text. Then delete this section.

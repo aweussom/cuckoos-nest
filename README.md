@@ -93,8 +93,9 @@ What I have run, on Windows 11 with Copilot SDK 1.0.8 and Claude Code 2.1.319, a
 - A turn parked for 420 s before the tool results came back. It resumed normally.
 - Two `claude-copilot` sessions started one second apart. They got ports 8790 and 8791, and both bridges were gone afterwards.
 - `install-windows.bat` on a machine that already had everything, and from a 116-character path, where it refused as it should.
+- `install-windows.bat` on a clean Windows Sandbox, all the way from no winget to a signed-in Copilot, then `claude-copilot.cmd -p` and one short interactive session with a tool call. Passed on the second try. The first run found two places where winget put things somewhere I did not expect (see `TODONT.md`).
 
-Not run yet: the interactive TUI on real work, Esc in the middle of a turn, `/compact`, images in tool results, and the install branches of `install-windows.bat` (winget installs, stale PATH).
+Not run yet: the interactive TUI on real work, Esc in the middle of a turn, `/compact`, and images in tool results.
 
 Quick checks after a change:
 
@@ -120,14 +121,12 @@ Then:
 .\tests\sandbox\make-wsb.ps1
 ```
 
-It writes `logs/cuckoos-nest.wsb` with your repo path and opens it. The repo is mapped read-only and copied to `C:\cuckoos-nest` at logon, so the sandbox never writes into your checkout. Inside the sandbox:
+It writes `logs/cuckoos-nest.wsb` with your repo path and opens it. The repo is mapped read-only and copied to `C:\cuckoos-nest` at logon, so the sandbox never writes into your checkout. `logs/sandbox-out` is mapped writable as `C:\out`, because the Sandbox clipboard comes and goes. Inside the sandbox:
 
 1. Run `C:\cuckoos-nest\install-windows.bat`. It should stop with "winget not found", because Sandbox ships without winget.
 2. Run `C:\tests\bootstrap-winget.cmd`. Microsoft's documented way to get winget into Sandbox.
-3. Open a new terminal and run `install-windows.bat` again. This exercises the winget installs and the stale-PATH restarts.
+3. Open a new terminal and run `install-windows.bat` again. It should install everything without asking for a new window, then offer `copilot login`.
 4. Open another new terminal and run `C:\cuckoos-nest\claude-copilot.cmd`.
-
-I have not done this run yet.
 
 ## License
 

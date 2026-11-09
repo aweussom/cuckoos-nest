@@ -66,6 +66,27 @@ provided either through stdin or as a prompt argument") [OBSERVED
 2026-11-09, Claude Code 2.1.319]. Comma-separate the tools and pass the
 prompt on stdin or before the flag.
 
+## Finding winget installs only where I expected them
+
+In a clean Windows Sandbox, `winget install --id Microsoft.PowerShell`
+(7.6.9.0) installed the MSIX package: no `%ProgramFiles%\PowerShell\7`,
+only a 0-byte app execution alias in `%LOCALAPPDATA%\Microsoft\WindowsApps`.
+The installer looked only in Program Files and asked for a new window.
+`winget install --id GitHub.Copilot` put `copilot.exe` in
+`%LOCALAPPDATA%\GitHubCopilotCLI`, not `WinGet\Links`; the installer did not
+find it, skipped the login prompt without a word, and the first
+`claude-copilot.cmd` died with "JSON-RPC Error -32603: ... Not
+authenticated" [OBSERVED 2026-11-09]. Both paths are checked now, and a
+Copilot CLI that is installed but not found prints a `[!]` line instead of
+nothing. Where winget puts a package is per package and can change; check
+after the install, never assume.
+
+## Pasting into Windows Sandbox
+
+The clipboard worked out of the sandbox, then died both ways mid-test
+[OBSERVED 2026-11-09]. `make-wsb.ps1` now maps `logs\sandbox-out` writable
+as `C:\out`; redirect results there instead of copying text.
+
 ## Starting the bridge with `Start-Process uv run ...`
 
 The `uv` on PATH was `%LOCALAPPDATA%\Microsoft\WinGet\Links\uv.exe`, a link
