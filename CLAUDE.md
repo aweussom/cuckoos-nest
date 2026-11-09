@@ -28,8 +28,10 @@ the measurements.
   in `plan_request` says why. Do not parallelise or reorder it.
 - **The launcher has no `param()` block** and never calls `Set-Location`.
   Both are deliberate; `TODONT.md` has what went wrong otherwise.
-- **Kill the process tree** (`taskkill /T`). The bridge runs as a child of
-  `uv run` and of the venv's launcher stub.
+- **Start the bridge with `.venv\Scripts\python.exe`, not `uv run`,** and
+  kill the process tree (`taskkill /T`). The venv python is a launcher stub
+  with the interpreter as its child; `uv` itself may be a winget link whose
+  pid is gone at once.
 - **No employer names, internal hostnames or personal paths** in anything
   committed. This repo is public.
 

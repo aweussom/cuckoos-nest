@@ -74,7 +74,7 @@ if ($BridgeStop) {
     foreach ($f in $pidFiles) {
         $orphanPid = [int](Get-Content $f.FullName)
         Write-Host "Stopping orphaned harness bridge pid $orphanPid and its children ($($f.Name))"
-        # /T: the bridge is a child of `uv run` (and of a venv launcher stub).
+        # /T: the venv python.exe is a launcher stub; the bridge is its child.
         & taskkill.exe /PID $orphanPid /T /F 2>&1 | Out-Null
         Remove-Item $f.FullName
     }
@@ -126,11 +126,20 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
+# Start the venv's python directly, not `uv run`. The `uv` on PATH may be a
+# winget link that relaunches the real uv and exits at once: Start-Process
+# then returns a pid that is already gone, and teardown misses the bridge
+# (TODONT.md). uv sync above guarantees this python exists.
+$python = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
+if (-not (Test-Path $python)) {
+    Write-Error "uv sync finished but $python does not exist."
+    exit 1
+}
 Write-Host "Starting harness bridge on $baseUrl (model $BridgeModel, small $BridgeSmallModel), expecting it up within ~30 s"
 Write-Host "  log: $log"
-$proc = Start-Process -FilePath 'uv' -WindowStyle Hidden -PassThru `
+$proc = Start-Process -FilePath $python -WindowStyle Hidden -PassThru `
     -WorkingDirectory $PSScriptRoot `
-    -ArgumentList @('run', '--frozen', '--project', $PSScriptRoot, (Join-Path $PSScriptRoot 'bridge.py'), '--port', $port, '--model', $BridgeModel, '--small-model', $BridgeSmallModel) `
+    -ArgumentList @((Join-Path $PSScriptRoot 'bridge.py'), '--port', $port, '--model', $BridgeModel, '--small-model', $BridgeSmallModel) `
     -RedirectStandardError $log -RedirectStandardOutput "$log.out"
 Set-Content -Path $pidFile -Value $proc.Id
 
@@ -192,9 +201,8 @@ try {
     }
     # Tear down. Runs on normal exit, Ctrl+C and a failed start alike.
     Write-Host "Stopping harness bridge pid $($proc.Id) and its children on port $port"
-    # /T: the bridge runs as a child of `uv run`, and on Windows the venv
-    # python.exe is itself a stub with the real interpreter as its child.
-    # Killing only the top process can leave the bridge up.
+    # /T: the venv python.exe is a launcher stub with the real interpreter as
+    # its child. Killing only the stub can leave the bridge up.
     & taskkill.exe /PID $proc.Id /T /F 2>&1 | Out-Null
     Remove-Item $pidFile -ErrorAction SilentlyContinue
 }

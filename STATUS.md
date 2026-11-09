@@ -16,12 +16,16 @@ refused because of a Copilot runtime defect in tool-result pairing.
   2026-11-09, gpt-6-luna].
 - Prompt cache: from the second call of a conversation, nearly the whole
   context is a cache read [OBSERVED 2026-11-09].
-- `claude-copilot.ps1`: two concurrent sessions got ports 8790 and 8791;
-  both bridges were gone afterwards, no pid files left [OBSERVED 2026-11-09].
-  After the move to `uv run`: one headless run with a Read call, Copilot
-  session resumed, bridge and pid file gone afterwards; one reverse-order
-  probe on claude-sonnet-5 correct [OBSERVED 2026-11-09, uv 0.12.17].
-  The two-session test has not been repeated under uv.
+- `claude-copilot.ps1` (uv sync, then `.venv\Scripts\python.exe` directly):
+  one headless run with a Read call through `claude-copilot.cmd`, Copilot
+  session resumed, no bridge process and no pid file afterwards; two
+  concurrent sessions got ports 8790 and 8791, both torn down [OBSERVED
+  2026-11-09, uv 0.12.17]. One reverse-order probe on claude-sonnet-5 via
+  `uv run` correct.
+- `install-windows.bat` on a machine that already had everything: all four
+  tools found, `uv sync` done, login prompt declined, exit 0. From a
+  116-character path it refused with exit 1 [OBSERVED 2026-11-09]. The
+  install branches (winget, stale PATH) have not been run.
 - `check_tool_order.py`, first run [OBSERVED 2026-11-09, CLI 1.0.73]:
   gpt-6-luna broken, gpt-6-sol broken, kimi-k3 inconclusive, claude-sonnet-5
   fixed (control).

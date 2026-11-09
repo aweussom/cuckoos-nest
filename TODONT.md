@@ -65,3 +65,13 @@ port from launch, and an answer only counts while our own process is alive.
 provided either through stdin or as a prompt argument") [OBSERVED
 2026-11-09, Claude Code 2.1.319]. Comma-separate the tools and pass the
 prompt on stdin or before the flag.
+
+## Starting the bridge with `Start-Process uv run ...`
+
+The `uv` on PATH was `%LOCALAPPDATA%\Microsoft\WinGet\Links\uv.exe`, a link
+that relaunches the real uv and exits. `Start-Process -PassThru` got the pid
+of the process that exited (HasExited was True 3 s after start), and
+`taskkill /T` on it missed the real tree: a bridge from an earlier session was
+still listening on 8790, and the next session moved to 8791 [OBSERVED
+2026-11-09, uv 0.12.17 via winget]. The launcher now runs `uv sync` and starts
+`.venv\Scripts\python.exe` itself.

@@ -8,9 +8,17 @@ Claude Code on GitHub Copilot models. A small local bridge that speaks Anthropic
 
 That starts a bridge on a free localhost port, runs `claude` against it on `claude-opus-5.5`, and kills the bridge when `claude` exits.
 
+## Do you need this?
+
+Probably not. Check these first:
+
+1. GitHub's own Copilot CLI. Native client, needs nothing extra.
+2. If you do not like the Copilot CLI, use [opencode](https://opencode.ai). GitHub has supported Copilot login in opencode officially since January 2026: run `opencode auth login`, pick GitHub Copilot, and every Copilot model shows up as `github-copilot/...`. I run opencode 2.2.6 that way. It talks to Copilot directly, not through the SDK this repo uses, so the GPT result-pairing problem below does not apply. Quick test with gpt-6-luna: it paired parallel tool results correctly 3 of 3 times. This is the setup I'd recommend.
+3. This repo is for people who want Claude Code itself on Copilot models, and nothing else will do.
+
 ## Why
 
-I have a Copilot plan with a monthly AI credit allowance. Most of it goes unused. The people around me want Claude Code, not another harness. opencode has had an official Copilot login since January 2026, so it needs none of this. Claude Code has no Copilot provider, so it gets a bridge.
+I have a Copilot plan with a monthly AI credit allowance. Most of it goes unused. The people around me want Claude Code, not another harness. Claude Code has no Copilot provider, so it gets a bridge.
 
 ## How it works
 
@@ -24,22 +32,29 @@ The bridge returns the parked calls to Claude Code as `tool_use` with `stop_reas
 
 Only the documented SDK surface is used. No private endpoints, no token scraping.
 
-## Requirements
+## Install
 
-- Windows with PowerShell 7. The bridge itself is plain Python, but the launcher is PowerShell and that is all I have tested.
-- [uv](https://docs.astral.sh/uv/). The launcher runs `uv sync --frozen` on every start, so the first run sets up `.venv` from `uv.lock`.
-- Claude Code on `PATH`.
-- A Copilot login for your user (`copilot login`, or any Copilot CLI or SDK login on the machine).
+Double-click `install-windows.bat`, or run it from a terminal. It checks for PowerShell 7, uv, Claude Code and the Copilot CLI, and offers to install whatever is missing through winget. It sets up the Python environment from `uv.lock` and offers to run `copilot login`. It asks before it installs anything, and it is safe to run again.
+
+It refuses to install from a folder inside OneDrive, with a space in the path, or with a path longer than 60 characters. Python environments break in those places in ways I do not want to debug. Move the folder to `C:\cuckoos-nest` and run it there.
+
+If you already have PowerShell 7, uv, Claude Code and a Copilot login, skip it. The launcher runs `uv sync --frozen` on every start anyway.
+
+I've only tested this on Windows 11. The bridge itself is plain Python, but the launcher is PowerShell.
 
 ## Usage
 
+From the project you want to work on:
+
 ```powershell
-.\claude-copilot.ps1                                # interactive, claude-opus-5.5
-.\claude-copilot.ps1 -BridgeModel claude-sonnet-5   # cheaper main model
-.\claude-copilot.ps1 -c                             # anything else goes to claude unchanged
-.\claude-copilot.ps1 -p "fix the failing test"
-.\claude-copilot.ps1 -BridgeStop                    # kill bridges left behind by a closed window
+C:\cuckoos-nest\claude-copilot.cmd                                # interactive, claude-opus-5.5
+C:\cuckoos-nest\claude-copilot.cmd -BridgeModel claude-sonnet-5   # cheaper main model
+C:\cuckoos-nest\claude-copilot.cmd -c                             # anything else goes to claude unchanged
+C:\cuckoos-nest\claude-copilot.cmd -p "fix the failing test"
+C:\cuckoos-nest\claude-copilot.cmd -BridgeStop                    # kill bridges left behind by a closed window
 ```
+
+`claude-copilot.cmd` runs `claude-copilot.ps1` with execution policy bypassed, so it also works from cmd and on machines where downloaded scripts are blocked. From PowerShell 7 you can call the `.ps1` directly.
 
 The launcher's own flags all start with `-Bridge`. It has no `param()` block on purpose: PowerShell would otherwise eat Claude Code's short flags like `-p` and `-c`. Each run gets its own bridge and port from 8790 up, so two sessions side by side do not interfere. Logs go to `logs/bridge-<date>-<port>.log`.
 
