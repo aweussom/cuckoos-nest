@@ -85,7 +85,7 @@ It runs the reverse-order probe five times per model and keeps the last verdict 
 
 There are no offline tests yet. Everything below talks to the live Copilot runtime and spends a few AI credits per run.
 
-What I have run, on Windows 11 with Copilot SDK 1.0.8 and Claude Code 2.1.319, all headless (`claude -p`):
+What I have run, on Windows 11 with Copilot SDK 1.0.8 and Claude Code 2.1.319, headless (`claude -p`) unless it says otherwise:
 
 - A bug fix in a small repo: Bash, two parallel Reads, Edit, Bash again. Passed.
 - A new function with tests on claude-opus-5.5, then a follow-up with `-c` that stayed on the same Copilot session. Passed.
