@@ -94,10 +94,12 @@ def block_text(block):
     return ""
 
 
-def message_signature(msg):
+def message_signature(msg, user_text=True):
     """Stable fingerprint of one message. Ignores cache_control, thinking
     blocks and whitespace: Claude Code moves cache markers between calls and
-    may trim text it echoes back."""
+    may trim text it echoes back. user_text=False leaves out the text of user
+    messages: Claude Code rewrites context it already sent (after /model it
+    re-wrapped the environment block in <system-reminder> tags, 2026-11-10)."""
     parts = [msg["role"]]
     content = msg["content"]
     if isinstance(content, str):
@@ -105,6 +107,8 @@ def message_signature(msg):
     for b in content:
         t = b.get("type")
         if t == "text":
+            if msg["role"] == "user" and not user_text:
+                continue
             txt = b.get("text", "").strip()
             if txt:
                 parts.append("t:" + hashlib.sha1(txt.encode()).hexdigest()[:12])
@@ -129,6 +133,20 @@ def tool_names(tools):
     return sorted(t["name"] for t in tools or [])
 
 
+def declared_tools(tools):
+    """Anthropic tool definitions as Copilot tools the SDK never answers."""
+    sdk_tools = []
+    for t in tools or []:
+        sdk_tools.append(Tool(
+            name=t["name"],
+            description=t.get("description", ""),
+            parameters=t.get("input_schema") or {"type": "object", "properties": {}},
+            handler=None,           # never answered by the SDK: we answer it
+            skip_permission=True,   # Claude Code does its own permission prompts
+        ))
+    return sdk_tools
+
+
 # ---------------------------------------------------------------- conversation
 
 class Conversation:
@@ -140,6 +158,7 @@ class Conversation:
         self.system = system
         self.tool_names = tool_names(tools)
         self.sigs = []              # signatures of messages the session has seen
+        self.loose_sigs = []        # the same without user text, see message_signature
         self.events = queue.Queue() # SDK loop thread -> Flask worker
         self.pending = {}           # tool_call_id -> request_id (parked calls)
         self.parked_at = None
@@ -147,29 +166,45 @@ class Conversation:
         self.session = None
         self.closed = False
 
-        sdk_tools = []
-        for t in tools or []:
-            sdk_tools.append(Tool(
-                name=t["name"],
-                description=t.get("description", ""),
-                parameters=t.get("input_schema") or {"type": "object", "properties": {}},
-                handler=None,           # never answered by the SDK: we answer it
-                skip_permission=True,   # Claude Code does its own permission prompts
-            ))
-        kwargs = dict(
-            tools=sdk_tools,
+        # Everything but tools and model, so retool() can resume with the same.
+        self.session_kwargs = dict(
             available_tools=ToolSet().add_custom("*"),
             system_message={"mode": "replace", "content": system or "You are a helpful assistant."},
             streaming=True,
             skip_custom_instructions=True,
             enable_skills=False,
-            model=model,
         )
+        sdk_tools = declared_tools(tools)
         log.info("%s: creating session model=%s tools=%d system=%d chars, expecting ~0.5 s",
                  self.id, model, len(sdk_tools), len(system or ""))
-        self.session = run_async(CLIENT.create_session(**kwargs))
+        self.session = run_async(CLIENT.create_session(tools=sdk_tools, model=model, **self.session_kwargs))
         self.session.on(self._on_event)
         log.info("%s: session %s up", self.id, self.session.session_id)
+
+    def retool(self, tools):
+        """Claude Code adds tools mid-session (ToolSearch loads deferred ones).
+        resume_session on the live session id swaps the tool list and keeps
+        history, also while a turn is parked (probed 2026-11-10, SDK 1.0.8).
+        The client then routes events to the new session object only."""
+        new_names = tool_names(tools)
+        added = sorted(set(new_names) - set(self.tool_names))
+        removed = sorted(set(self.tool_names) - set(new_names))
+        log.info("%s: tool list changed (added %s, removed %s); resume_session with %d tools, "
+                 "expecting history kept", self.id, added, removed, len(new_names))
+        session = run_async(CLIENT.resume_session(self.session.session_id, tools=declared_tools(tools),
+                                                  model=self.model, **self.session_kwargs))
+        session.on(self._on_event)
+        self.session = session
+        self.tool_names = new_names
+        log.info("%s: session %s resumed with the new tool list", self.id, session.session_id)
+
+    def switch_model(self, model):
+        """/model in Claude Code. set_model keeps the session's history
+        (probed 2026-11-10, SDK 1.0.8); a new session would flatten it."""
+        log.info("%s: switching model %s -> %s on the live session, expecting history kept",
+                 self.id, self.model, model)
+        run_async(self.session.set_model(model))
+        self.model = model
 
     def _on_event(self, ev):
         # Runs on the SDK loop thread. Hand everything to the worker.
@@ -205,22 +240,57 @@ class Conversation:
             log.warning("%s: disconnect failed: %s", self.id, e)
 
 
-def find_conversation(model, system, tools, sigs):
+def find_conversation(model, system, tools, sigs, loose_sigs):
     """A live conversation whose seen messages are exactly this request's
-    history minus the new last message."""
+    history minus the new last message. Second choice: the same history
+    where only the text of earlier user messages changed (Claude Code
+    rewrote context it had already sent). The session keeps the old text;
+    losing a re-wrapped reminder beats flattening the whole conversation."""
+    # Model and tools are not part of the match: plan_request switches the
+    # model and swaps the tool list on the conversation it gets back.
     want_tools = tool_names(tools)
     with CONV_LOCK:
-        for conv in CONVERSATIONS.values():
-            if conv.closed or conv.model != model or conv.system != system:
-                continue
-            if conv.tool_names != want_tools:
-                continue
-            if len(conv.sigs) != len(sigs) - 1:
-                continue
-            if conv.sigs != sigs[:-1]:
-                continue
+        candidates = [c for c in CONVERSATIONS.values()
+                      if not c.closed and c.system == system and len(c.sigs) == len(sigs) - 1]
+    for conv in candidates:
+        if conv.sigs == sigs[:-1]:
             return conv
+    for conv in candidates:
+        if conv.loose_sigs != loose_sigs[:-1]:
+            continue
+        changed = [i for i, (a, b) in enumerate(zip(conv.sigs, sigs[:-1])) if a != b]
+        log.warning("%s: resuming although the text of earlier user message(s) %s changed; "
+                    "the session keeps the text it saw first", conv.id, changed)
+        return conv
+    explain_no_match(model, system, want_tools, sigs)
     return None
+
+
+def explain_no_match(model, system, want_tools, sigs):
+    """Log why no live conversation took this request. A request that should
+    have resumed but did not ends on the lossy path, so say which check failed
+    and, for history, the first message whose signature differs."""
+    with CONV_LOCK:
+        live = [c for c in CONVERSATIONS.values() if not c.closed]
+    if not live:
+        return
+    if len(sigs) <= 1:
+        return  # a new conversation; nothing to match
+    for conv in live:
+        reasons = []
+        if conv.system != system:
+            first = next((i for i, (a, b) in enumerate(zip(conv.system, system)) if a != b),
+                         min(len(conv.system), len(system)))
+            reasons.append(f"system differs at char {first} ({len(conv.system)} vs {len(system)} chars)")
+        expected = sigs[:-1]
+        if conv.sigs != expected:
+            first = next((i for i, (a, b) in enumerate(zip(conv.sigs, expected)) if a != b),
+                         min(len(conv.sigs), len(expected)))
+            had = conv.sigs[first] if first < len(conv.sigs) else "(none)"
+            got = expected[first] if first < len(expected) else "(none)"
+            reasons.append(f"history: seen {len(conv.sigs)}, request has {len(expected)} before the new one; "
+                           f"first difference at message {first}: seen {had!r}, got {got!r}")
+        log.warning("%s: not resuming it: %s", conv.id, "; ".join(reasons) or "pending/busy")
 
 
 def reap_parked():
@@ -376,8 +446,14 @@ def pick_model(requested):
         return "claude-sonnet-5"
     if "opus" in requested and "claude-opus-5.5" in COPILOT_MODELS:
         return "claude-opus-5.5"
-    log.warning("no mapping for model %r, using default %s", requested, DEFAULT_MODEL)
-    return DEFAULT_MODEL
+    if not requested:
+        log.info("no model in request, using default %s", DEFAULT_MODEL)
+        return DEFAULT_MODEL
+    # Refuse instead of falling back: a silent fallback had Claude Code's
+    # status line say "Fable 5.1" while claude-opus-5.5 answered (2026-11-10).
+    usable = sorted(m for m in COPILOT_MODELS if m.startswith(VERIFIED_MODEL_PREFIXES))
+    raise ValueError(f"model {requested!r} has no Copilot equivalent on this bridge "
+                     f"(usable here: {', '.join(usable)}). Pick another model with /model.")
 
 
 # Model families whose parallel tool results pair by id in the Copilot
@@ -408,11 +484,23 @@ def plan_request(body):
     require_verified(model)
     system = system_text(body.get("system"))
     tools = body.get("tools") or []
+    # Server tools (web_search_20250305 and kin) run on Anthropic's side.
+    # Passed on as plain tools they came back as "0 searches" with no error
+    # (2026-11-10), so refuse them where Claude Code shows the reason.
+    server_tools = [t.get("type") for t in tools if t.get("type") not in (None, "custom")]
+    if server_tools:
+        raise ValueError(f"server tool(s) {server_tools} run on Anthropic's servers and are not available "
+                         f"through the Copilot bridge (WebSearch does not work here)")
     messages = normalize_messages(body["messages"])
     sigs = [message_signature(m) for m in messages]
+    loose_sigs = [message_signature(m, user_text=False) for m in messages]
     last = messages[-1]
 
-    conv = find_conversation(model, system, tools, sigs)
+    conv = find_conversation(model, system, tools, sigs, loose_sigs)
+    if conv and conv.model != model:
+        conv.switch_model(model)
+    if conv and conv.tool_names != tool_names(tools):
+        conv.retool(tools)
 
     if conv and conv.pending:
         content = last["content"] if isinstance(last["content"], list) else []
@@ -436,6 +524,7 @@ def plan_request(body):
                         HandlePendingToolCallRequest(request_id=request_id, result=res)), timeout=30)
                 conv.pending = {}
             conv.sigs = sigs
+            conv.loose_sigs = loose_sigs
             return conv, start, "resume"
         log.warning("%s: parked on %s but call carries results for %s; abandoning it",
                     conv.id, sorted(conv.pending), sorted(results))
@@ -445,6 +534,7 @@ def plan_request(body):
     if conv and not conv.pending:
         text = user_text(last)
         conv.sigs = sigs
+        conv.loose_sigs = loose_sigs
 
         def start():
             run_async(conv.session.send(text), timeout=30)
@@ -468,6 +558,7 @@ def plan_request(body):
         prompt = ("<earlier_conversation>\n" + flatten_history(history)
                   + "\n</earlier_conversation>\n\n" + prompt)
     conv.sigs = sigs
+    conv.loose_sigs = loose_sigs
     path = "fresh-flattened" if history else "fresh"
 
     def start():
@@ -539,6 +630,7 @@ def messages_endpoint():
                      "content": [{"type": "text", "text": "".join(text_parts)}]
                      + [{"type": "tool_use", "id": cid} for cid, _, _ in tool_uses]}
         conv.sigs = conv.sigs + [message_signature(assistant)]
+        conv.loose_sigs = conv.loose_sigs + [message_signature(assistant, user_text=False)]
         log.info("%s: done %s in %.1fs, in=%d out=%d cache_read=%d",
                  conv.id, stop, time.monotonic() - t0, usage[0], usage[1], usage[2])
         yield ("end", (stop, usage))

@@ -192,6 +192,24 @@ try {
         [Environment]::SetEnvironmentVariable($name, $vars[$name])
     }
 
+    # Auto mode's safety check runs on Anthropic's servers and never answers
+    # through the bridge: every action it would judge is refused, without a
+    # prompt (2026-11-10). A settings.json defaultMode of "auto" would put
+    # every session there, so pick a mode unless the caller did.
+    $modeGiven = $false
+    foreach ($a in $ClaudeArgs) {
+        if ($a -like '--permission-mode*' -or $a -eq '--dangerously-skip-permissions') {
+            $modeGiven = $true
+        }
+    }
+    if (-not $modeGiven) {
+        Write-Host "Using --permission-mode acceptEdits: auto mode cannot work through the bridge"
+        $ClaudeArgs = @('--permission-mode', 'acceptEdits') + $ClaudeArgs
+    }
+    if (($ClaudeArgs -join ' ') -match '--permission-mode[ =]auto') {
+        Write-Host "Warning: auto mode refuses every action its server-side check would judge; nothing answers that check through the bridge"
+    }
+
     Write-Host "Starting claude on Copilot model $BridgeModel via $baseUrl"
     & claude @ClaudeArgs
     $claudeExit = $LASTEXITCODE
