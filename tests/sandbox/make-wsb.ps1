@@ -24,6 +24,10 @@ $tests = $PSScriptRoot
 $out = Join-Path $repo 'logs'
 New-Item -ItemType Directory -Force $out | Out-Null
 $wsb = Join-Path $out 'cuckoos-nest.wsb'
+# The one writable mapping: the sandbox clipboard is unreliable (it died both
+# ways mid-test on 2026-11-09), so results go to a file the host can read.
+$results = Join-Path $out 'sandbox-out'
+New-Item -ItemType Directory -Force $results | Out-Null
 
 $xml = @"
 <Configuration>
@@ -38,6 +42,11 @@ $xml = @"
       <HostFolder>$tests</HostFolder>
       <SandboxFolder>C:\tests</SandboxFolder>
       <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+    <MappedFolder>
+      <HostFolder>$results</HostFolder>
+      <SandboxFolder>C:\out</SandboxFolder>
+      <ReadOnly>false</ReadOnly>
     </MappedFolder>
   </MappedFolders>
   <LogonCommand>

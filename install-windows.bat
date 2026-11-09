@@ -31,6 +31,9 @@ rem --- 1. PowerShell 7 ------------------------------------------------------
 set "PWSH="
 where pwsh >nul 2>nul && set "PWSH=pwsh"
 if not defined PWSH if exist "%ProgramFiles%\PowerShell\7\pwsh.exe" set "PWSH=%ProgramFiles%\PowerShell\7\pwsh.exe"
+rem winget may pick the MSIX package (seen in Windows Sandbox, 7.6.9): no
+rem Program Files folder, only a 0-byte app execution alias in WindowsApps.
+if not defined PWSH if exist "%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe" set "PWSH=%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe"
 
 if not defined PWSH (
     echo  PowerShell 7 is not installed. Windows ships 5.1, which is too old.
@@ -50,9 +53,9 @@ if not defined PWSH (
     choice /C YN /M "  Run it now"
     if errorlevel 2 goto :fail
     winget install --id Microsoft.PowerShell --source winget
-    if exist "%ProgramFiles%\PowerShell\7\pwsh.exe" (
-        set "PWSH=%ProgramFiles%\PowerShell\7\pwsh.exe"
-    ) else (
+    if exist "%ProgramFiles%\PowerShell\7\pwsh.exe" set "PWSH=%ProgramFiles%\PowerShell\7\pwsh.exe"
+    if exist "%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe" set "PWSH=%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe"
+    if not defined PWSH (
         echo.
         echo  Installed, but this window's PATH is stale. Close this window and
         echo  double-click install-windows.bat again.
@@ -121,6 +124,9 @@ rem Copilot CLI or SDK login.
 set "COPILOT="
 where copilot >nul 2>nul && set "COPILOT=copilot"
 if not defined COPILOT if exist "%LOCALAPPDATA%\Microsoft\WinGet\Links\copilot.exe" set "COPILOT=%LOCALAPPDATA%\Microsoft\WinGet\Links\copilot.exe"
+rem winget's GitHub.Copilot installs here, not in WinGet\Links (seen in
+rem Windows Sandbox 2026-11-09). Missing it skipped the login step silently.
+if not defined COPILOT if exist "%LOCALAPPDATA%\GitHubCopilotCLI\copilot.exe" set "COPILOT=%LOCALAPPDATA%\GitHubCopilotCLI\copilot.exe"
 
 if not defined COPILOT (
     echo  The Copilot CLI is not installed. You need it once, for `copilot login`,
@@ -132,6 +138,13 @@ if not defined COPILOT (
     if errorlevel 2 goto :skipcopilot
     winget install --id GitHub.Copilot --source winget
     if exist "%LOCALAPPDATA%\Microsoft\WinGet\Links\copilot.exe" set "COPILOT=%LOCALAPPDATA%\Microsoft\WinGet\Links\copilot.exe"
+    if exist "%LOCALAPPDATA%\GitHubCopilotCLI\copilot.exe" set "COPILOT=%LOCALAPPDATA%\GitHubCopilotCLI\copilot.exe"
+    if not defined COPILOT (
+        echo.
+        echo  [!] Copilot CLI installed, but this window cannot find it ^(stale PATH^).
+        echo      After this script, open a NEW terminal and run:  copilot login
+        echo      The bridge fails with "Not authenticated" until you do.
+    )
 )
 :skipcopilot
 if defined COPILOT echo  [+] Copilot CLI found.
