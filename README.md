@@ -81,6 +81,54 @@ uv run check_tool_order.py --mail-script C:\path\to\send-mail.ps1
 
 It runs the reverse-order probe five times per model and keeps the last verdict per model in `logs/tool-order/state.json`. The mail script is any PowerShell script that takes `-Subject` and `-Body` and exits 0. It is only called when a verdict changes.
 
+## Testing
+
+There are no offline tests yet. Everything below talks to the live Copilot runtime and spends a few AI credits per run.
+
+What I have run, on Windows 11 with Copilot SDK 1.0.8 and Claude Code 2.1.319, all headless (`claude -p`):
+
+- A bug fix in a small repo: Bash, two parallel Reads, Edit, Bash again. Passed.
+- A new function with tests on claude-opus-5.5, then a follow-up with `-c` that stayed on the same Copilot session. Passed.
+- A subagent, in the foreground and in the background, mapped to claude-sonnet-5. Passed.
+- A turn parked for 420 s before the tool results came back. It resumed normally.
+- Two `claude-copilot` sessions started one second apart. They got ports 8790 and 8791, and both bridges were gone afterwards.
+- `install-windows.bat` on a machine that already had everything, and from a 116-character path, where it refused as it should.
+
+Not run yet: the interactive TUI on real work, Esc in the middle of a turn, `/compact`, images in tool results, and the install branches of `install-windows.bat` (winget installs, stale PATH).
+
+Quick checks after a change:
+
+```powershell
+uv run python -m py_compile bridge.py probe_tool_order.py check_tool_order.py
+uv run probe_tool_order.py claude-sonnet-5 8 reverse
+.\claude-copilot.cmd -p "Read some file and list what is in it. Do not change anything." --allowedTools Read
+```
+
+The bridge log, `logs/bridge-<date>-<port>.log`, says which path each request took. `fresh` is a new conversation, `resume` is tool results going back into a parked turn, and `continue` is a new user message on a live session. `fresh-flattened` in the middle of a session means it fell back to the lossy path.
+
+### Clean-machine test in Windows Sandbox
+
+`tests/sandbox/` tests `install-windows.bat` on a Windows with nothing on it. Windows Sandbox has to be enabled first: as admin, then reboot.
+
+```powershell
+Enable-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM -All
+```
+
+Then:
+
+```powershell
+.\tests\sandbox\make-wsb.ps1
+```
+
+It writes `logs/cuckoos-nest.wsb` with your repo path and opens it. The repo is mapped read-only and copied to `C:\cuckoos-nest` at logon, so the sandbox never writes into your checkout. Inside the sandbox:
+
+1. Run `C:\cuckoos-nest\install-windows.bat`. It should stop with "winget not found", because Sandbox ships without winget.
+2. Run `C:\tests\bootstrap-winget.cmd`. Microsoft's documented way to get winget into Sandbox.
+3. Open a new terminal and run `install-windows.bat` again. This exercises the winget installs and the stale-PATH restarts.
+4. Open another new terminal and run `C:\cuckoos-nest\claude-copilot.cmd`.
+
+I have not done this run yet.
+
 ## License
 
 MIT.
