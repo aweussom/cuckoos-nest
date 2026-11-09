@@ -1,0 +1,17 @@
+[project]
+name = "cuckoos-nest"
+version = "0.1.0"
+description = "Claude Code on GitHub Copilot models, through the Copilot SDK"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    # Pinned: the bridge leans on external-tool parking and session options
+    # that were validated on exactly this version (docs/FEASIBILITY-2026-11-09.md).
+    "github-copilot-sdk==1.0.8",
+    "flask>=3.1",
+]
+
+[tool.uv]
+# Scripts, not a package: `uv run bridge.py` from the repo root.
+package = false
