@@ -81,6 +81,45 @@ Copilot CLI that is installed but not found prints a `[!]` line instead of
 nothing. Where winget puts a package is per package and can change; check
 after the install, never assume.
 
+## Matching a conversation on model, tool list and exact history
+
+`find_conversation` required the same model, the same tool names and
+byte-identical earlier messages. Three things Claude Code does in normal use
+broke that, and every miss went to the lossy path [OBSERVED 2026-11-10,
+Claude Code 2.1.321]:
+
+- `/model` changes the model (a new Copilot session was made).
+- After `/model`, Claude Code re-wrapped the environment block it had
+  already sent (message 1, role system) in `<system-reminder>` tags. Same
+  content, different text, so message 0's signature changed.
+- ToolSearch loading WebSearch grew the tool list from 15 to 16.
+
+In the Fable session the result was a new flattened session on every request
+after the first miss: 13, 16, 19 messages, cache_read stuck at 13 961 (the
+system prompt) instead of ~29 000. Now: model via `set_model`, tools via
+`resume_session`, and user-text changes are tolerated when roles, tool ids
+and assistant text match.
+
+## Falling back to the default model for unknown ids
+
+`pick_model` used the default for anything it could not map. With Fable 5.1
+picked, Claude Code's status line said Fable while claude-opus-5.5 answered,
+and only a WARNING in the bridge log said so [OBSERVED 2026-11-10]. Now a 400.
+
+## Passing server tools through as plain tools
+
+Claude Code's WebSearch sends `web_search_20250305`, which Anthropic runs
+server side. As a declared tool with no handler, the model answered without
+searching and Claude Code showed "Did 0 searches", no error [OBSERVED
+2026-11-10]. Now a 400 naming the tool.
+
+## Auto mode through the bridge
+
+Its safety check is server side and never answers here; actions it would
+judge are refused without a prompt [OBSERVED 2026-11-10]. Do not try to
+answer the check from the bridge: that would be faking a safety mechanism.
+The launcher passes `--permission-mode acceptEdits`.
+
 ## Pasting into Windows Sandbox
 
 The clipboard worked out of the sandbox, then died both ways mid-test

@@ -2,9 +2,11 @@
 
 Claude Code runs on Copilot models through `bridge.py` on `claude-opus-5.5`
 and `claude-sonnet-5`, headless and in the interactive TUI. The TUI has had
-one short session with a tool call, not real work. `install-windows.bat`
-has been run end to end on a clean Windows Sandbox. GPT models are refused
-because of a Copilot runtime defect in tool-result pairing.
+a few short sessions with tools, not real work. A conversation now stays on
+one Copilot session through `/model` and mid-session tool additions.
+`install-windows.bat` has been run end to end on a clean Windows Sandbox.
+GPT models are refused because of a Copilot runtime defect in tool-result
+pairing. Auto mode and WebSearch cannot work through the bridge.
 
 ## Verified
 
@@ -51,6 +53,27 @@ because of a Copilot runtime defect in tool-result pairing.
   - uv: the installer continued through `WinGet\Links\uv.exe` without a new
     window. Claude Code needs a new terminal after install, as the installer
     says.
+- Session continuity, interactive TUI, Claude Code 2.1.321, SDK 1.0.8
+  [OBSERVED 2026-11-10]: one session (`conv_fbfae5efdf`) went fresh ->
+  resume -> `/model` Opus to Sonnet (`set_model`, history kept) -> continue
+  x3 -> WebSearch loaded by ToolSearch (`resume_session` with 16 tools) ->
+  resume. No `fresh-flattened`. Before the fix, the same events flattened
+  every later request.
+- `resume_session` on a live session id with a larger tool list keeps
+  history and the new tool is callable, also while a turn is parked; no
+  duplicate events. `set_model` keeps history. Scratch probes, a few
+  credits [OBSERVED 2026-11-10, claude-sonnet-5].
+- Unknown model (`claude-fable-5-1`) gets a 400 naming the usable models;
+  `web_search_20250305` gets a 400 and the model reports it [OBSERVED
+  2026-11-10].
+- Auto mode: the server-side check never answers through the bridge, so
+  Bash calls it would judge are refused without a prompt; one denial did
+  not break the session. `acceptEdits` with a normal prompt works
+  [OBSERVED 2026-11-10]. Launcher now passes `--permission-mode acceptEdits`
+  unless a mode is given.
+- Copilot bills per token in AI credits ($0.01); Opus 5.5 $4 in / $0.20
+  cached / $5 cache write / $20 out per 1M, Sonnet 5 $2 / $0.20 / $2.50 /
+  $10 [DOCUMENTED docs.github.com models-and-pricing, read 2026-11-10].
 - `check_tool_order.py`, first run [OBSERVED 2026-11-09, CLI 1.0.73]:
   gpt-6-luna broken, gpt-6-sol broken, kimi-k3 inconclusive, claude-sonnet-5
   fixed (control).
@@ -60,13 +83,19 @@ because of a Copilot runtime defect in tool-result pairing.
 - Interactive TUI on real work, Esc mid-turn, `/compact`, rewind. All of
   them except the TUI itself go through the lossy path (history flattened
   to text).
+- The loose history match (earlier user text changed, structure the same)
+  could in theory resume the wrong conversation; it requires identical
+  roles, tool ids and assistant text, so I think that is unlikely
+  [INFERRED]. Watch for `resuming although` in the log.
+- System prompt changes mid-session still flatten. Not seen yet.
 - The `[!]` message when the Copilot CLI is installed but not found; it is
   the fallback, and the second sandbox found copilot.
 - Images in tool results.
 - Whether Copilot's terms cover driving another vendor's harness through the
   SDK.
-- Behaviour with a full user setup: hooks, skills and MCP servers from
-  `~/.claude`. Headless tests ran with `--setting-sources project`.
+- Hooks and actual MCP tool calls. The interactive sessions ran with the
+  owner's full `~/.claude` (global CLAUDE.md, skills, deferred MCP tools),
+  but no MCP tool was called and no hook fired that I know of.
 
 ## Next
 

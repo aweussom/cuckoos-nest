@@ -30,6 +30,8 @@ Copilot does not hand out raw completions. The SDK gives you an agent session. T
 
 The bridge returns the parked calls to Claude Code as `tool_use` with `stop_reason: tool_use`. Claude Code runs the tools itself, with its own permission prompts, and sends the results in the next request. The bridge feeds them into the parked turn and streams what the model does next. A conversation stays on one Copilot session, so the prompt cache works: from the second call on, nearly the whole context is a cache read.
 
+The session survives `/model` (the bridge calls `set_model` on it) and tools that Claude Code loads in the middle of a session, such as a deferred tool found by ToolSearch (the bridge re-registers the session with the new tool list). Before 2026-11-10 both of those dropped the session and fell back to the lossy path below, on every request after.
+
 Only the documented SDK surface is used. No private endpoints, no token scraping.
 
 ## Install
@@ -49,28 +51,56 @@ From the project you want to work on:
 ```powershell
 C:\cuckoos-nest\claude-copilot.cmd                                # interactive, claude-opus-5.5
 C:\cuckoos-nest\claude-copilot.cmd -BridgeModel claude-sonnet-5   # cheaper main model
+C:\cuckoos-nest\claude-copilot.cmd -BridgeSmallModel claude-sonnet-5  # model for Sonnet, Haiku and background calls
+C:\cuckoos-nest\claude-copilot.cmd -BridgePort 8800               # first port to try (default 8790)
 C:\cuckoos-nest\claude-copilot.cmd -c                             # anything else goes to claude unchanged
 C:\cuckoos-nest\claude-copilot.cmd -p "fix the failing test"
 C:\cuckoos-nest\claude-copilot.cmd -BridgeStop                    # kill bridges left behind by a closed window
 ```
 
+Claude Code asks for Anthropic model ids. The bridge maps them: Opus to `-BridgeModel`, Sonnet and Haiku (and with them most subagents) to `-BridgeSmallModel`, which defaults to `claude-sonnet-5`. A model with no Copilot match, Fable for instance, gets a 400 that says so. Before 2026-11-10 it quietly got the default model, and the status line said Fable while Opus answered.
+
+The launcher starts claude with `--permission-mode acceptEdits` unless you pass a mode yourself. Auto mode does not work here, see Limits.
+
 `claude-copilot.cmd` runs `claude-copilot.ps1` with execution policy bypassed, so it also works from cmd and on machines where downloaded scripts are blocked. From PowerShell 7 you can call the `.ps1` directly.
 
-The launcher's own flags all start with `-Bridge`. It has no `param()` block on purpose: PowerShell would otherwise eat Claude Code's short flags like `-p` and `-c`. Each run gets its own bridge and port from 8790 up, so two sessions side by side do not interfere. Logs go to `logs/bridge-<date>-<port>.log`.
+The launcher's own flags all start with `-Bridge`. It has no `param()` block on purpose: PowerShell would otherwise eat Claude Code's short flags like `-p` and `-c`. Each run gets its own bridge and the first free port of 20, from 8790 up, so two sessions side by side do not interfere. With all 20 taken it stops and suggests `-BridgeStop`. Logs go to `logs/bridge-<date>-<port>.log`.
 
-Mind you; Claude Code will warn that claude.ai connectors are disabled because another auth source is set. That is expected. I think it is the better default here: connectors would send mail and wiki content to Copilot's models.
+Two environment variables for the bridge:
+
+- `BRIDGE_DUMP_DIR=<dir>` writes every request Claude Code sends as JSON. For debugging. The files hold your prompts and file contents.
+- `BRIDGE_ALLOW_UNVERIFIED=1` lets GPT and other unverified models through. Do not. See Limits for why they are refused.
+
+Mind you, Claude Code will warn that claude.ai connectors are disabled because another auth source is set. That is expected. I think it is the better default here: connectors would send mail and wiki content to Copilot's models.
 
 ## Limits
 
 - Only `claude-*` models. On GPT models the Copilot runtime pairs parallel tool results by answer order, not by call id. Answered in reverse order, gpt-6-luna and gpt-6-sol swapped the results 3 of 3 times. The bridge answers in the model's order, but a wrong pairing gives the model another file's contents with no error anywhere, so GPT is refused until that is fixed. `check_tool_order.py` re-tests it and can mail you when a verdict changes.
 - The bridge binds to loopback only and has no auth. It hands out commands that run on your machine - do not put it on a network.
-- Esc in the middle of a turn, `/compact`, rewind and MCP servers that connect mid-session all end up on a fallback path: a fresh Copilot session with the earlier conversation flattened to text. That works, but it is lossy, and I have not measured how much worse it is.
-- I have tested it headless (`claude -p`) with tools, follow-ups and subagents. I have not used the interactive TUI for real work yet.
+- Esc in the middle of a turn, `/compact` and rewind end up on a fallback path: a fresh Copilot session with the earlier conversation flattened to text. That works, but it is lossy, and I have not measured how much worse it is. It also costs more, because the whole history is written to the cache again.
+- Auto mode does not work. Its safety check runs on Anthropic's servers, and nothing answers it through the bridge, so every action it would judge is refused without asking you. The launcher picks `acceptEdits` for that reason. Shift+Tab can still cycle you back into auto mode; don't.
+- WebSearch does not work. It is a server tool that runs on Anthropic's side. The bridge refuses it with a 400 that says so, and the model tells you. Copilot has its own Bing search, which an account admin can turn off (mine is), and the bridge does not use it.
+- I have tested it headless (`claude -p`) with tools, follow-ups and subagents, and in the interactive TUI for a few short sessions with my own `~/.claude` setup (global CLAUDE.md, skills, MCP tools loaded through ToolSearch). Not for an hour of real work yet. Hooks and actual MCP tool calls are untested.
 - Thinking blocks are not passed through, and reasoning effort is not forwarded.
 - I have not checked whether Copilot's terms cover this use. It is the documented SDK, but driving another vendor's harness is not what the docs describe.
 - Tested on Copilot SDK 1.0.8 (pinned) and Claude Code 2.1.319. Both move fast. :-/
 
 `docs/FEASIBILITY-2026-11-09.md` has the details and the numbers.
+
+## Cost
+
+Copilot bills per token in AI credits, 1 credit = $0.01. From [GitHub's pricing page](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing), read 2026-11-10, per million tokens:
+
+| Model | Input | Cached input | Cache write | Output |
+|---|---|---|---|---|
+| claude-opus-5.5 | $4.00 | $0.20 | $5.00 | $20.00 |
+| claude-sonnet-5 | $2.00 | $0.20 | $2.50 | $10.00 |
+
+Sonnet is half price on everything but cached input, which is what `-BridgeModel claude-sonnet-5` is for. A cache read is a twentieth of fresh input on Opus, so a session that stays on one Copilot session is a lot cheaper than one that keeps falling back. The page does not say which plans include which models; check your own model list. Prices change, so check the page before you trust the table.
+
+## Uninstall
+
+Delete the folder. Everything the bridge makes lives inside it: `.venv`, `logs/`, and `.copilot-runtime/` if you run a Microsoft Store Python. The installer's winget packages (PowerShell 7, uv, Claude Code, the Copilot CLI) are ordinary packages; remove them with `winget uninstall` if you do not want them. The `copilot login` lives in your user profile, not in this folder, and the CLI I have has no logout command.
 
 ## Checking the GPT defect
 
@@ -87,10 +117,11 @@ There are no offline tests yet. Everything below talks to the live Copilot runti
 
 What I have run, on Windows 11 with Copilot SDK 1.0.8 and Claude Code 2.1.319, headless (`claude -p`) unless it says otherwise:
 
-- A bug fix in a small repo: Bash, two parallel Reads, Edit, Bash again. Passed.
+- A bug fix in a small repo: Bash, two parallel Reads, Edit, Bash again. Passed, on gpt-6-luna, before GPT was refused. Not re-run on a Claude model.
 - A new function with tests on claude-opus-5.5, then a follow-up with `-c` that stayed on the same Copilot session. Passed.
 - A subagent, in the foreground and in the background, mapped to claude-sonnet-5. Passed.
-- A turn parked for 420 s before the tool results came back. It resumed normally.
+- A turn parked for 420 s before the tool results came back. It resumed normally. Also on gpt-6-luna.
+- Interactive TUI, a few short sessions with tools: a `/model` switch from Opus to Sonnet and WebSearch being loaded mid-session, all on one Copilot session; Fable refused with a 400; WebSearch refused with a 400.
 - Two `claude-copilot` sessions started one second apart. They got ports 8790 and 8791, and both bridges were gone afterwards.
 - `install-windows.bat` on a machine that already had everything, and from a 116-character path, where it refused as it should.
 - `install-windows.bat` on a clean Windows Sandbox, all the way from no winget to a signed-in Copilot, then `claude-copilot.cmd -p` and one short interactive session with a tool call. Passed on the second try. The first run found two places where winget put things somewhere I did not expect (see `TODONT.md`).
