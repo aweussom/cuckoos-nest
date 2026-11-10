@@ -2,8 +2,8 @@
 so Claude Code can run on Copilot models. Normally started per session by
 claude-copilot.ps1; by hand:
 
-    venv/Scripts/python.exe bridge.py --port 8790
-    ANTHROPIC_BASE_URL=http://127.0.0.1:8790 ANTHROPIC_AUTH_TOKEN=x \
+    BRIDGE_TOKEN=<random> venv/Scripts/python.exe bridge.py --port 8790
+    ANTHROPIC_BASE_URL=http://127.0.0.1:8790 ANTHROPIC_AUTH_TOKEN=<same> \
     ANTHROPIC_MODEL=claude-opus-5.5 claude
 
 How it works, and why it is not a plain proxy:
@@ -34,6 +34,7 @@ import argparse
 import asyncio
 import base64
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -75,6 +76,10 @@ PARK_TIMEOUT_S = 1800      # a parked turn nobody resumes is aborted after this
 TURN_TIMEOUT_S = 600       # max silence from the runtime while streaming
 
 DUMP_DIR = os.environ.get("BRIDGE_DUMP_DIR")
+# Shared secret with the client, one per run. Loopback keeps the LAN out but
+# not other local processes, nor a browser page posting text/plain to
+# 127.0.0.1, which needs no CORS preflight (REVIEW.md, 2026-11-10).
+TOKEN = os.environ.get("BRIDGE_TOKEN", "")
 CONVERSATIONS = {}         # conv_id -> Conversation
 CONV_LOCK = threading.Lock()
 
@@ -572,6 +577,22 @@ def sse(event, data):
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
+@app.before_request
+def require_token():
+    """Claude Code sends ANTHROPIC_AUTH_TOKEN as a Bearer token, an API key
+    as x-api-key. Either must equal BRIDGE_TOKEN."""
+    sent = request.headers.get("x-api-key", "")
+    bearer = request.headers.get("Authorization", "")
+    if bearer.startswith("Bearer "):
+        sent = bearer[len("Bearer "):]
+    if sent and hmac.compare_digest(sent, TOKEN):
+        return None
+    log.warning("refused %s %s from %s: missing or wrong token", request.method, request.path,
+                request.remote_addr)
+    return jsonify({"type": "error", "error": {"type": "authentication_error",
+                                               "message": "missing or wrong bridge token"}}), 401
+
+
 @app.post("/v1/messages")
 def messages_endpoint():
     reap_parked()
@@ -779,11 +800,15 @@ def main():
                     help="for Claude Code's haiku-class calls (titles, summaries)")
     args = ap.parse_args()
     # This endpoint hands out tool calls that Claude Code executes on its own
-    # machine, with no auth in front. Anyone on the LAN could drive that.
-    # Loopback only.
+    # machine. The token keeps out local callers that do not have it; the LAN
+    # stays out because it never gets a socket. Loopback only.
     if args.host not in ("127.0.0.1", "::1", "localhost"):
         raise SystemExit(f"--host {args.host!r} refused: the harness bridge binds loopback only "
                          f"(127.0.0.1, ::1 or localhost)")
+    if not TOKEN:
+        raise SystemExit("BRIDGE_TOKEN is not set. The bridge refuses to run without a token: "
+                         "set BRIDGE_TOKEN=<random> here and ANTHROPIC_AUTH_TOKEN=<same> for claude "
+                         "(claude-copilot.ps1 does both)")
     DEFAULT_MODEL, SMALL_MODEL = args.model, args.small_model
     for name in (DEFAULT_MODEL, SMALL_MODEL):
         try:

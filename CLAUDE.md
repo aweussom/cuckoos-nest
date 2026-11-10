@@ -16,9 +16,10 @@ the measurements.
 
 ## Rules that bite here
 
-- **Loopback only.** The bridge hands out tool calls that the harness runs on
-  this machine, with no auth in front. `--host` refuses anything but
-  loopback. Do not add a LAN option.
+- **Loopback only, token always.** The bridge hands out tool calls that the
+  harness runs on this machine. `--host` refuses anything but loopback, and
+  the bridge refuses to start without `BRIDGE_TOKEN` and answers 401 to any
+  request without it. Do not add a LAN option or a no-token mode.
 - **Verified models only.** `VERIFIED_MODEL_PREFIXES` in `bridge.py` is the
   allowlist (`claude-` today). GPT models pair parallel tool results by answer
   order in the Copilot runtime; a wrong pairing gives the model another

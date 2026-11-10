@@ -137,12 +137,27 @@ if (-not (Test-Path $python)) {
     Write-Error "uv sync finished but $python does not exist."
     exit 1
 }
+# A token per run. Loopback alone does not keep out other local processes,
+# or a web page posting text/plain to 127.0.0.1 (REVIEW.md, 2026-11-10). The
+# bridge gets it through its environment, claude as ANTHROPIC_AUTH_TOKEN.
+$tokenBytes = [byte[]]::new(32)
+[System.Security.Cryptography.RandomNumberGenerator]::Fill($tokenBytes)
+$token = [Convert]::ToHexString($tokenBytes)
+$authHeader = @{ Authorization = "Bearer $token" }
+
 Write-Host "Starting harness bridge on $baseUrl (model $BridgeModel, small $BridgeSmallModel), expecting it up within ~30 s"
 Write-Host "  log: $log"
-$proc = Start-Process -FilePath $python -WindowStyle Hidden -PassThru `
-    -WorkingDirectory $PSScriptRoot `
-    -ArgumentList @((Join-Path $PSScriptRoot 'bridge.py'), '--port', $port, '--model', $BridgeModel, '--small-model', $BridgeSmallModel) `
-    -RedirectStandardError $log -RedirectStandardOutput "$log.out"
+# Start-Process passes this process's environment on. Set the token only
+# around the call, so it does not stay in the caller's session.
+$env:BRIDGE_TOKEN = $token
+try {
+    $proc = Start-Process -FilePath $python -WindowStyle Hidden -PassThru `
+        -WorkingDirectory $PSScriptRoot `
+        -ArgumentList @((Join-Path $PSScriptRoot 'bridge.py'), '--port', $port, '--model', $BridgeModel, '--small-model', $BridgeSmallModel) `
+        -RedirectStandardError $log -RedirectStandardOutput "$log.out"
+} finally {
+    Remove-Item Env:BRIDGE_TOKEN -ErrorAction SilentlyContinue
+}
 Set-Content -Path $pidFile -Value $proc.Id
 
 $saved = @{}
@@ -157,7 +172,9 @@ try {
             throw "Harness bridge exited with code $($proc.ExitCode) before answering. Last log lines:`n$((Get-Content $log -Tail 15) -join "`n")"
         }
         try {
-            $r = Invoke-RestMethod -Uri "$baseUrl/v1/models" -TimeoutSec 3
+            # With our token, only our own bridge answers; another bridge on
+            # the same port refuses it.
+            $r = Invoke-RestMethod -Uri "$baseUrl/v1/models" -Headers $authHeader -TimeoutSec 3
             $up = [bool]$r.data
         } catch {
             $up = $false
@@ -177,7 +194,7 @@ try {
     # real ANTHROPIC_API_KEY would be sent to the bridge; both are cleared.
     $vars = [ordered]@{
         ANTHROPIC_BASE_URL                       = $baseUrl
-        ANTHROPIC_AUTH_TOKEN                     = 'cuckoos-nest'   # not checked by the bridge
+        ANTHROPIC_AUTH_TOKEN                     = $token   # checked by the bridge
         ANTHROPIC_API_KEY                        = $null
         ANTHROPIC_MODEL                          = $BridgeModel
         ANTHROPIC_DEFAULT_OPUS_MODEL             = $BridgeModel

@@ -85,7 +85,7 @@ Each check sends the classifier's own system prompt, about 48,000 tokens. The se
 ## Limits
 
 - Only `claude-*` models. On GPT models the Copilot runtime pairs parallel tool results by answer order, not by call id. Answered in reverse order, gpt-6-luna and gpt-6-sol swapped the results 3 of 3 times. The bridge answers in the model's order, but a wrong pairing gives the model another file's contents with no error anywhere, so GPT is refused until that is fixed. `check_tool_order.py` re-tests it and can mail you when a verdict changes.
-- The bridge binds to loopback only and has no auth. It hands out commands that run on your machine - do not put it on a network.
+- The bridge binds to loopback only. It hands out commands that run on your machine - do not put it on a network. The launcher makes a random token per run and the bridge refuses requests without it, so other local programs and web pages that post to 127.0.0.1 get a 401. Before 2026-11-10 there was no token.
 - Esc in the middle of a turn, `/compact` and rewind end up on a fallback path: a fresh Copilot session with the earlier conversation flattened to text. That works, but it is lossy, and I have not measured how much worse it is. It also costs more, because the whole history is written to the cache again.
 - Auto mode works only with the client-side classifier, which the launcher turns on. Run `claude` against the bridge some other way and it refuses every action it would check.
 - WebSearch does not work. It is a server tool that runs on Anthropic's side. The bridge refuses it with a 400 that says so, and the model tells you. Copilot has its own Bing search, which an account admin can turn off (mine is), and the bridge does not use it.
