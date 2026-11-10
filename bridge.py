@@ -376,7 +376,16 @@ def run_turn(conv, start):
         while not conv.events.empty():
             conv.events.get_nowait()
         conv.parked_at = None
-        start()
+        # start() talks to the Copilot runtime (send, or answering parked
+        # calls). Raised here, it cut a streamed response off after
+        # message_start and left the conversation open in an unknown state,
+        # possibly with some parked calls answered and some not (REVIEW.md).
+        try:
+            start()
+        except Exception as e:
+            log.exception("%s: handing the turn to the Copilot runtime failed", conv.id)
+            yield ("error", f"handing the turn to the Copilot runtime failed: {type(e).__name__}: {e}")
+            return
         tool_batch = None       # tool requests of the latest assistant message
         requested = {}          # tool_call_id -> request_id seen so far
         while True:
@@ -645,6 +654,8 @@ def messages_endpoint():
                 yield ("text", f"\n[bridge error] {payload}")
                 stop = "end_turn"
                 conv.close("error")
+                with CONV_LOCK:
+                    CONVERSATIONS.pop(conv.id, None)
             elif kind == "stop":
                 stop = payload
         assistant = {"role": "assistant",

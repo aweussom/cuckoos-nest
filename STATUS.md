@@ -115,10 +115,11 @@ the client-side classifier, which the launcher turns on.
   UserPromptSubmit run timed out at 5 s twice [OBSERVED 2026-11-10], cause
   unknown.
 - REVIEW.md (2026-11-10, read-only review from a bridge session) lists
-  open findings (the first, no auth, is fixed: per-run token, 401 without
-  it, OBSERVED 2026-11-10): -BridgeStop and pid reuse, port
-  reservation gap, side requests matching the main conversation, half-
-  written stream on send errors. Not fixed yet.
+  open findings. Fixed: no auth (per-run token, 401 without it) and the
+  half-sent response when start() fails (now `[bridge error]` and a closed
+  conversation; offline test with a raising start(), stream and JSON)
+  [OBSERVED 2026-11-10]. Open: -BridgeStop and pid reuse, port
+  reservation gap, side requests matching the main conversation.
 
 ## Next
 
