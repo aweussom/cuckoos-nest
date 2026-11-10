@@ -123,8 +123,31 @@ the client-side classifier, which the launcher turns on.
   bridges whose launcher PowerShell is alive; ports are reserved with
   CreateNew when picked. Two sessions started together got 8790 and 8791,
   -BridgeStop mid-run left both, both answered [OBSERVED 2026-11-10].
-  Open: side requests matching the main conversation (hypothesis, not
-  seen in any log).
+  Open from that review (REVIEW.md itself deleted once these were moved
+  here), all [INFERRED] from reading the code:
+  - `find_conversation` does not skip a busy conversation, and
+    `plan_request` changes sigs, model and tools before `run_turn` takes
+    `conv.busy`. A side request forking the main history would be spliced
+    into the main session; a tool-less one would `retool([])` it and the
+    one-shot branch would close it. Not seen in any log. Cheap guard: skip
+    conversations whose `busy` lock is held, and log it.
+  - Conversations that end normally keep their Copilot session until the
+    bridge exits (one per subagent in a long TUI session).
+  - `PARK_TIMEOUT_S = 1800`: a permission prompt left 30 min loses the
+    session to the lossy path. Longest measured park is 420 s.
+  - Text Claude Code sends beside tool results (reminders, a user
+    interjection) is appended to the first tool result, so the model
+    cannot tell it from file content. Copilot limit; belongs in README
+    Limits, maybe with a marker tag.
+  - `pick_model` maps sonnet/opus to hard-coded ids, not `--model` /
+    `--small-model` (only bites when run by hand). Its docstring says
+    `claude-sonnet-5-5`, unchecked against a dump.
+  - `bridge.py` imports private SDK modules (`copilot._mode`,
+    `copilot._cli_version`); an SDK upgrade must check them first.
+  - `count_tokens` is `len(json)//4`; base64 images inflate it.
+  - Offline tests worth writing, fixtures from scrubbed dumps:
+    `message_signature`, `normalize_messages`, `find_conversation` with
+    fake conversations, the stop-sequence cut.
 
 ## Next
 

@@ -2,7 +2,7 @@
 so Claude Code can run on Copilot models. Normally started per session by
 claude-copilot.ps1; by hand:
 
-    BRIDGE_TOKEN=<random> venv/Scripts/python.exe bridge.py --port 8790
+    BRIDGE_TOKEN=<random> .venv/Scripts/python.exe bridge.py --port 8790
     ANTHROPIC_BASE_URL=http://127.0.0.1:8790 ANTHROPIC_AUTH_TOKEN=<same> \
     ANTHROPIC_MODEL=claude-opus-5.5 claude
 
