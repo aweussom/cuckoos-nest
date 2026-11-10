@@ -6,7 +6,8 @@ a few short sessions with tools, not real work. A conversation now stays on
 one Copilot session through `/model` and mid-session tool additions.
 `install-windows.bat` has been run end to end on a clean Windows Sandbox.
 GPT models are refused because of a Copilot runtime defect in tool-result
-pairing. Auto mode and WebSearch cannot work through the bridge.
+pairing. WebSearch cannot work through the bridge. Auto mode works with
+the client-side classifier, which the launcher turns on.
 
 ## Verified
 
@@ -66,11 +67,26 @@ pairing. Auto mode and WebSearch cannot work through the bridge.
 - Unknown model (`claude-fable-5-1`) gets a 400 naming the usable models;
   `web_search_20250305` gets a 400 and the model reports it [OBSERVED
   2026-11-10].
-- Auto mode: the server-side check never answers through the bridge, so
-  Bash calls it would judge are refused without a prompt; one denial did
-  not break the session. `acceptEdits` with a normal prompt works
-  [OBSERVED 2026-11-10]. Launcher now passes `--permission-mode acceptEdits`
-  unless a mode is given.
+- Auto mode, server-side check (the default with a gateway): never answers
+  through the bridge, Bash calls it would judge are refused without a
+  prompt; one denial did not break the session [OBSERVED 2026-11-10].
+- Auto mode, client-side classifier (`CLAUDE_CODE_AUTO_MODE_SERVER=0`, set
+  by the launcher), headless [OBSERVED 2026-11-10]: one stage-1 classifier
+  call per checked Bash call, to claude-sonnet-5, cut at `</severity>`,
+  session closed after. Allowed: curl to example.com, POST of README to
+  httpbin, push to a temp branch. Force push stopped by a deny rule in the
+  owner's settings, not the classifier. A push-delete blocked on Anthropic's
+  API was allowed through the bridge, but that prompt asked for it outright.
+  The classifier blocking something itself through the bridge: not seen.
+- Classifier cost: its system prompt is ~47,800 tokens. Fresh session cold:
+  47,807 cache write; second run: 47,718 cache read, 89 write [OBSERVED
+  2026-11-10, probe]. Roughly 12 credits cold, 1 warm, on Sonnet 5.
+- Usage numbers the bridge reports for fast one-shot calls are wrong
+  (classifier showed cache_write ~4,200, probe showed 47,807): the usage
+  event seems to arrive after idle [INFERRED]. Display only; Copilot bills
+  what it counts.
+- `ENABLE_CLAUDEAI_MCP_SERVERS=false` silences the claude.ai connectors
+  warning; `--strict-mcp-config` does not [OBSERVED 2026-11-10, 2.1.321].
 - Copilot bills per token in AI credits ($0.01); Opus 5.5 $4 in / $0.20
   cached / $5 cache write / $20 out per 1M, Sonnet 5 $2 / $0.20 / $2.50 /
   $10 [DOCUMENTED docs.github.com models-and-pricing, read 2026-11-10].
@@ -93,9 +109,15 @@ pairing. Auto mode and WebSearch cannot work through the bridge.
 - Images in tool results.
 - Whether Copilot's terms cover driving another vendor's harness through the
   SDK.
-- Hooks and actual MCP tool calls. The interactive sessions ran with the
-  owner's full `~/.claude` (global CLAUDE.md, skills, deferred MCP tools),
-  but no MCP tool was called and no hook fired that I know of.
+- Actual MCP tool calls. The interactive sessions ran with the owner's full
+  `~/.claude` (global CLAUDE.md, skills, deferred MCP tools); no MCP tool
+  was called. Hooks fire: the owner's tab-colour hook works, but its
+  UserPromptSubmit run timed out at 5 s twice [OBSERVED 2026-11-10], cause
+  unknown.
+- REVIEW.md (2026-11-10, read-only review from a bridge session) lists
+  open findings: no auth on the bridge, -BridgeStop and pid reuse, port
+  reservation gap, side requests matching the main conversation, half-
+  written stream on send errors. Not fixed yet.
 
 ## Next
 

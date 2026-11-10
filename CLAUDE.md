@@ -47,7 +47,7 @@ uv run probe_tool_order.py claude-sonnet-5 8 reverse   # live, a few Copilot cre
 There are no offline tests yet. Every check above talks to the live Copilot
 runtime and spends AI credits. A change to `bridge.py` is validated by a
 `claude-copilot.ps1 -p` run that uses tools (Read, Edit, Bash), then checking
-`logs/bridge-<date>-<port>.log` for `fresh` / `resume` / `continue`.
+`logs/bridge-<date>-<time>-<port>.log` for `fresh` / `resume` / `continue`.
 
 ## Writing
 

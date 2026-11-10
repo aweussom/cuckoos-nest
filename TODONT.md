@@ -113,12 +113,30 @@ server side. As a declared tool with no handler, the model answered without
 searching and Claude Code showed "Did 0 searches", no error [OBSERVED
 2026-11-10]. Now a 400 naming the tool.
 
-## Auto mode through the bridge
+## Auto mode with the server-side check
 
-Its safety check is server side and never answers here; actions it would
-judge are refused without a prompt [OBSERVED 2026-11-10]. Do not try to
-answer the check from the bridge: that would be faking a safety mechanism.
-The launcher passes `--permission-mode acceptEdits`.
+By default Claude Code (2.1.278+) asks the server for the auto mode verdict
+inside the model requests when `ANTHROPIC_BASE_URL` points at a gateway.
+Nothing answers that through the bridge, and actions it would judge are
+refused without a prompt [OBSERVED 2026-11-10]. Do not answer the check from
+the bridge: that would be faking a safety mechanism.
+
+First fix, wrong: force `--permission-mode acceptEdits` and call auto mode
+impossible. `CLAUDE_CODE_AUTO_MODE_SERVER=0` makes Claude Code send its own
+classifier requests, which the bridge serves like any call [DOCUMENTED
+code.claude.com/docs/en/permission-modes; OBSERVED 2026-11-10]. The launcher
+sets it.
+
+The classifier's stage 1 asks for `<severity>N</severity>` with stop sequence
+`</severity>` and max_tokens 64. Copilot has no stop sequences; the bridge
+cuts non-streamed replies afterwards. Each check made a Copilot session that
+was never closed; tool-less requests now close theirs.
+
+## Logs named by date and port
+
+The next run on the same port the same day overwrote the log. A test's
+evidence was gone before anyone read it [OBSERVED 2026-11-10]. The name now
+has the start time.
 
 ## Pasting into Windows Sandbox
 
