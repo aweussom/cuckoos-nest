@@ -132,6 +132,15 @@ The classifier's stage 1 asks for `<severity>N</severity>` with stop sequence
 cuts non-streamed replies afterwards. Each check made a Copilot session that
 was never closed; tool-less requests now close theirs.
 
+## -BridgeStop on every pid file
+
+It killed every bridge with a pid file, including ones in use. Testing the
+stale-pid check, I ran it and killed the owner's idle interactive session on
+8790 [OBSERVED 2026-11-10]. The pid file now has the owning PowerShell on
+line 2, and -BridgeStop leaves the bridge while that process lives. The pid
+on line 1 must also still be `python.exe ... bridge.py --port N`, so a pid
+reused after a reboot is never killed.
+
 ## Logs named by date and port
 
 The next run on the same port the same day overwrote the log. A test's

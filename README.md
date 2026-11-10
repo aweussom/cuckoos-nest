@@ -62,7 +62,9 @@ Claude Code asks for Anthropic model ids. The bridge maps them: Opus to `-Bridge
 
 `claude-copilot.cmd` runs `claude-copilot.ps1` with execution policy bypassed, so it also works from cmd and on machines where downloaded scripts are blocked. From PowerShell 7 you can call the `.ps1` directly.
 
-The launcher's own flags all start with `-Bridge`. It has no `param()` block on purpose: PowerShell would otherwise eat Claude Code's short flags like `-p` and `-c`. Each run gets its own bridge and the first free port of 20, from 8790 up, so two sessions side by side do not interfere. With all 20 taken it stops and suggests `-BridgeStop`. Logs go to `logs/bridge-<date>-<time>-<port>.log`, one per run.
+The launcher's own flags all start with `-Bridge`. It has no `param()` block on purpose: PowerShell would otherwise eat Claude Code's short flags like `-p` and `-c`. Each run gets its own bridge and the first free port of 20, from 8790 up, so two sessions side by side do not interfere. With all 20 taken it stops and suggests `-BridgeStop`. The port is reserved with a pid file the moment it is picked, so two sessions started together get different ports. `-BridgeStop` only kills a bridge whose session is gone and whose pid still belongs to a bridge; a pid file left from before a reboot is just removed.
+
+When claude exits it prints `claude --resume <id>`. That goes to Anthropic, not through the bridge. To carry on on Copilot, run `claude-copilot.cmd --resume <id>`; the launcher says so under claude's line. Logs go to `logs/bridge-<date>-<time>-<port>.log`, one per run.
 
 Two environment variables for the bridge:
 

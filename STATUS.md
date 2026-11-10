@@ -118,8 +118,13 @@ the client-side classifier, which the launcher turns on.
   open findings. Fixed: no auth (per-run token, 401 without it) and the
   half-sent response when start() fails (now `[bridge error]` and a closed
   conversation; offline test with a raising start(), stream and JSON)
-  [OBSERVED 2026-11-10]. Open: -BridgeStop and pid reuse, port
-  reservation gap, side requests matching the main conversation.
+  [OBSERVED 2026-11-10]. Also fixed: -BridgeStop checks that the pid is
+  still our bridge (a ping process in a fake pid file survived) and leaves
+  bridges whose launcher PowerShell is alive; ports are reserved with
+  CreateNew when picked. Two sessions started together got 8790 and 8791,
+  -BridgeStop mid-run left both, both answered [OBSERVED 2026-11-10].
+  Open: side requests matching the main conversation (hypothesis, not
+  seen in any log).
 
 ## Next
 

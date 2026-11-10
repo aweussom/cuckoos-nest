@@ -63,6 +63,28 @@ $ErrorActionPreference = 'Stop'
 $logDir = Join-Path $PSScriptRoot 'logs'
 New-Item -ItemType Directory -Force $logDir | Out-Null
 
+# Who holds the pid file for $Port? Pids are reused: after a reboot a stale
+# file can point at anything, and taskkill /T /F on it would kill an
+# unrelated process tree (REVIEW.md). A pid file holds our bridge
+# (python.exe ... bridge.py --port N) or, while a session starts, the
+# PowerShell that reserved the port. That may be the user's own shell, so a
+# 'launcher' holder is never killed, only respected.
+# Returns 'bridge', 'launcher' or 'stale'.
+function Get-PidFileHolder([int]$ProcessId, [int]$Port) {
+    $p = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -ErrorAction SilentlyContinue
+    if ($null -eq $p) {
+        return 'stale'
+    }
+    $cmd = [string]$p.CommandLine
+    if ($cmd -like "*bridge.py*--port $Port*") {
+        return 'bridge'
+    }
+    if ($p.Name -in @('pwsh.exe', 'powershell.exe')) {
+        return 'launcher'
+    }
+    return 'stale'
+}
+
 if ($BridgeStop) {
     # Normal runs clean up after themselves. A pid file left behind means a
     # session ended without reaching its cleanup (window closed, killed).
@@ -72,7 +94,31 @@ if ($BridgeStop) {
         exit 0
     }
     foreach ($f in $pidFiles) {
-        $orphanPid = [int](Get-Content $f.FullName)
+        # Line 1: the pid holding the port (bridge, or the launcher while it
+        # starts). Line 2, once the bridge runs: the PowerShell that owns it.
+        $lines = @(Get-Content $f.FullName)
+        $orphanPid = [int]$lines[0]
+        $orphanPort = [int]($f.BaseName -replace '^bridge-', '')
+        if ($lines.Count -ge 2) {
+            $ownerPid = [int]$lines[1]
+            $owner = Get-Process -Id $ownerPid -ErrorAction SilentlyContinue
+            if ($null -ne $owner -and $owner.ProcessName -in @('pwsh', 'powershell')) {
+                # Its session may be idle, not dead (killed one by mistake
+                # on 2026-11-10). That launcher stops the bridge itself.
+                Write-Host "Leaving $($f.Name): its session (PowerShell pid $ownerPid) is still running"
+                continue
+            }
+        }
+        $holder = Get-PidFileHolder $orphanPid $orphanPort
+        if ($holder -eq 'launcher') {
+            Write-Host "Leaving $($f.Name): pid $orphanPid is a PowerShell holding the port while a session starts"
+            continue
+        }
+        if ($holder -eq 'stale') {
+            Write-Host "Not killing pid $orphanPid ($($f.Name)): gone, or not our bridge any more. Removing the stale pid file."
+            Remove-Item $f.FullName
+            continue
+        }
         Write-Host "Stopping orphaned harness bridge pid $orphanPid and its children ($($f.Name))"
         # /T: the venv python.exe is a launcher stub; the bridge is its child.
         & taskkill.exe /PID $orphanPid /T /F 2>&1 | Out-Null
@@ -94,21 +140,40 @@ if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
 # anything else, keeps its port.
 $port = $null
 for ($candidate = $BridgePort; $candidate -lt $BridgePort + 20; $candidate++) {
-    # A pid file marks a port as taken from the moment a bridge is launched,
-    # before it binds: a second session starting in that gap would otherwise
-    # pick the same port.
-    if (Test-Path (Join-Path $logDir "bridge-$candidate.pid")) {
-        continue
+    $candidatePidFile = Join-Path $logDir "bridge-$candidate.pid"
+    # A pid file whose process is gone or is not ours is left over from a
+    # session that never cleaned up. It must not block the port forever.
+    if (Test-Path $candidatePidFile) {
+        $holderPid = [int]@(Get-Content $candidatePidFile)[0]
+        $holder = Get-PidFileHolder $holderPid $candidate
+        if ($holder -ne 'stale') {
+            continue
+        }
+        Write-Host "Removing stale $candidatePidFile (pid $holderPid is gone or not ours)"
+        Remove-Item $candidatePidFile -ErrorAction SilentlyContinue
     }
     $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $candidate)
     try {
         $listener.Start()
         $listener.Stop()
-        $port = $candidate
-        break
     } catch {
         continue
     }
+    # Reserve the port now, not after uv sync: two sessions started close
+    # together both saw it free (REVIEW.md). CreateNew fails if the other
+    # one wrote first, so only one of them gets it. Holds our pid until the
+    # bridge's replaces it.
+    try {
+        $fs = [System.IO.File]::Open($candidatePidFile, [System.IO.FileMode]::CreateNew)
+        $bytes = [System.Text.Encoding]::ASCII.GetBytes([string]$PID)
+        $fs.Write($bytes, 0, $bytes.Length)
+        $fs.Close()
+    } catch {
+        Write-Host "Port $candidate was just reserved by another session; trying the next"
+        continue
+    }
+    $port = $candidate
+    break
 }
 if ($null -eq $port) {
     Write-Error "No free port in $BridgePort..$($BridgePort + 19). Orphaned bridges? Try -BridgeStop."
@@ -124,6 +189,8 @@ $log = Join-Path $logDir ("bridge-{0:yyyy-MM-dd-HHmmss}-{1}.log" -f (Get-Date), 
 Write-Host "Syncing Python environment (uv sync --frozen); the first run downloads dependencies"
 & uv sync --frozen --quiet --project $PSScriptRoot
 if ($LASTEXITCODE -ne 0) {
+    # Release the port first: Write-Error stops the script here.
+    Remove-Item $pidFile -ErrorAction SilentlyContinue
     Write-Error "uv sync failed (exit $LASTEXITCODE) in $PSScriptRoot"
     exit 1
 }
@@ -134,6 +201,7 @@ if ($LASTEXITCODE -ne 0) {
 # (TODONT.md). uv sync above guarantees this python exists.
 $python = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
 if (-not (Test-Path $python)) {
+    Remove-Item $pidFile -ErrorAction SilentlyContinue
     Write-Error "uv sync finished but $python does not exist."
     exit 1
 }
@@ -155,10 +223,14 @@ try {
         -WorkingDirectory $PSScriptRoot `
         -ArgumentList @((Join-Path $PSScriptRoot 'bridge.py'), '--port', $port, '--model', $BridgeModel, '--small-model', $BridgeSmallModel) `
         -RedirectStandardError $log -RedirectStandardOutput "$log.out"
+} catch {
+    Remove-Item $pidFile -ErrorAction SilentlyContinue
+    throw
 } finally {
     Remove-Item Env:BRIDGE_TOKEN -ErrorAction SilentlyContinue
 }
-Set-Content -Path $pidFile -Value $proc.Id
+# From here line 1 names the bridge; line 2 this PowerShell, which owns it.
+Set-Content -Path $pidFile -Value @($proc.Id, $PID)
 
 $saved = @{}
 $claudeExit = 1
@@ -222,6 +294,20 @@ try {
     Write-Host "Starting claude on Copilot model $BridgeModel via $baseUrl"
     & claude @ClaudeArgs
     $claudeExit = $LASTEXITCODE
+    # Claude Code prints "claude ... --resume <id>" on exit. Run like that it
+    # goes to Anthropic, not through the bridge. Its output cannot be
+    # rewritten without sitting between the TUI and the terminal, so say it
+    # underneath. Headless runs (-p) print no resume hint.
+    $headless = $false
+    foreach ($a in $ClaudeArgs) {
+        if ($a -eq '-p' -or $a -eq '--print') {
+            $headless = $true
+        }
+    }
+    if (-not $headless) {
+        Write-Host "To resume on Copilot, start it through this launcher instead:"
+        Write-Host "  $(Join-Path $PSScriptRoot 'claude-copilot.cmd') --resume <the id above>"
+    }
 } finally {
     foreach ($name in $saved.Keys) {
         [Environment]::SetEnvironmentVariable($name, $saved[$name])
