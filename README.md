@@ -18,7 +18,7 @@ Probably not. Check these first:
 
 ## Why
 
-I have a Copilot plan with a monthly AI credit allowance. Most of it goes unused. The people around me want Claude Code, not another harness. Claude Code has no Copilot provider, so it gets a bridge.
+I have a Copilot plan with a monthly AI credit allowance. Most of it goes unused. The people around me want Claude Code, not another harness. Claude Code has no Copilot provider, so it gets a bridge. Or a nest, if you'd like.
 
 ## How it works
 
@@ -60,25 +60,34 @@ C:\cuckoos-nest\claude-copilot.cmd -BridgeStop                    # kill bridges
 
 Claude Code asks for Anthropic model ids. The bridge maps them: Opus to `-BridgeModel`, Sonnet and Haiku (and with them most subagents) to `-BridgeSmallModel`, which defaults to `claude-sonnet-5`. A model with no Copilot match, Fable for instance, gets a 400 that says so. Before 2026-11-10 it quietly got the default model, and the status line said Fable while Opus answered.
 
-The launcher starts claude with `--permission-mode acceptEdits` unless you pass a mode yourself. Auto mode does not work here, see Limits.
-
 `claude-copilot.cmd` runs `claude-copilot.ps1` with execution policy bypassed, so it also works from cmd and on machines where downloaded scripts are blocked. From PowerShell 7 you can call the `.ps1` directly.
 
-The launcher's own flags all start with `-Bridge`. It has no `param()` block on purpose: PowerShell would otherwise eat Claude Code's short flags like `-p` and `-c`. Each run gets its own bridge and the first free port of 20, from 8790 up, so two sessions side by side do not interfere. With all 20 taken it stops and suggests `-BridgeStop`. Logs go to `logs/bridge-<date>-<port>.log`.
+The launcher's own flags all start with `-Bridge`. It has no `param()` block on purpose: PowerShell would otherwise eat Claude Code's short flags like `-p` and `-c`. Each run gets its own bridge and the first free port of 20, from 8790 up, so two sessions side by side do not interfere. With all 20 taken it stops and suggests `-BridgeStop`. Logs go to `logs/bridge-<date>-<time>-<port>.log`, one per run.
 
 Two environment variables for the bridge:
 
 - `BRIDGE_DUMP_DIR=<dir>` writes every request Claude Code sends as JSON. For debugging. The files hold your prompts and file contents.
 - `BRIDGE_ALLOW_UNVERIFIED=1` lets GPT and other unverified models through. Do not. See Limits for why they are refused.
 
-Mind you, Claude Code will warn that claude.ai connectors are disabled because another auth source is set. That is expected. I think it is the better default here: connectors would send mail and wiki content to Copilot's models.
+The launcher also sets two variables for claude:
+
+- `CLAUDE_CODE_AUTO_MODE_SERVER=0`, so auto mode works. See below.
+- `ENABLE_CLAUDEAI_MCP_SERVERS=false`. claude.ai connectors cannot load when an API key is set, and Claude Code would warn about it at every start. I think it is the better default anyway: connectors would send mail and wiki content to Copilot's models.
+
+### Auto mode
+
+Auto mode has a separate classifier model that judges actions before they run. By default Claude Code asks Anthropic's server to do that inside the normal model requests. Through the bridge nothing answers, and an action without a verdict is refused, without asking you. With `CLAUDE_CODE_AUTO_MODE_SERVER=0` Claude Code sends its own classifier requests instead. They go through the bridge to the small model, claude-sonnet-5, like any other call.
+
+I have tested that headless: `curl` to example.com, a POST of the README to httpbin and a push to a temporary branch were allowed, a force push was stopped by a deny rule in my settings. I have not seen the classifier itself block something through the bridge. One push-delete was blocked in a session on Anthropic's API and allowed through the bridge, but the second prompt asked for the delete outright, so that says little.
+
+Each check sends the classifier's own system prompt, about 48,000 tokens. The second check onward is a cache read, about 1 credit on Sonnet 5; a cold cache costs about 12. Shell commands and network calls get checked; reads and edits in the working directory do not.
 
 ## Limits
 
 - Only `claude-*` models. On GPT models the Copilot runtime pairs parallel tool results by answer order, not by call id. Answered in reverse order, gpt-6-luna and gpt-6-sol swapped the results 3 of 3 times. The bridge answers in the model's order, but a wrong pairing gives the model another file's contents with no error anywhere, so GPT is refused until that is fixed. `check_tool_order.py` re-tests it and can mail you when a verdict changes.
 - The bridge binds to loopback only and has no auth. It hands out commands that run on your machine - do not put it on a network.
 - Esc in the middle of a turn, `/compact` and rewind end up on a fallback path: a fresh Copilot session with the earlier conversation flattened to text. That works, but it is lossy, and I have not measured how much worse it is. It also costs more, because the whole history is written to the cache again.
-- Auto mode does not work. Its safety check runs on Anthropic's servers, and nothing answers it through the bridge, so every action it would judge is refused without asking you. The launcher picks `acceptEdits` for that reason. Shift+Tab can still cycle you back into auto mode; don't.
+- Auto mode works only with the client-side classifier, which the launcher turns on. Run `claude` against the bridge some other way and it refuses every action it would check.
 - WebSearch does not work. It is a server tool that runs on Anthropic's side. The bridge refuses it with a 400 that says so, and the model tells you. Copilot has its own Bing search, which an account admin can turn off (mine is), and the bridge does not use it.
 - I have tested it headless (`claude -p`) with tools, follow-ups and subagents, and in the interactive TUI for a few short sessions with my own `~/.claude` setup (global CLAUDE.md, skills, MCP tools loaded through ToolSearch). Not for an hour of real work yet. Hooks and actual MCP tool calls are untested.
 - Thinking blocks are not passed through, and reasoning effort is not forwarded.
@@ -136,7 +145,7 @@ uv run probe_tool_order.py claude-sonnet-5 8 reverse
 .\claude-copilot.cmd -p "Read some file and list what is in it. Do not change anything." --allowedTools Read
 ```
 
-The bridge log, `logs/bridge-<date>-<port>.log`, says which path each request took. `fresh` is a new conversation, `resume` is tool results going back into a parked turn, and `continue` is a new user message on a live session. `fresh-flattened` in the middle of a session means it fell back to the lossy path.
+The bridge log, `logs/bridge-<date>-<time>-<port>.log`, says which path each request took. `fresh` is a new conversation, `resume` is tool results going back into a parked turn, and `continue` is a new user message on a live session. `fresh-flattened` in the middle of a session means it fell back to the lossy path.
 
 ### Clean-machine test in Windows Sandbox
 
