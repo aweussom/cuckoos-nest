@@ -11,7 +11,7 @@
 # Every run starts its own bridge on the first free port from 8790 and tears
 # it down when claude exits, so two sessions never share or kill each other's
 # bridge, and nothing is left running. Loopback only.
-# Log: logs/bridge-<date>-<port>.log in this directory.
+# Log: logs/bridge-<date>-<time>-<port>.log in this directory.
 #
 # Needs: uv (it creates and syncs .venv from uv.lock on first run), Claude
 # Code on PATH, and Copilot logged in for this Windows user (`copilot login`,
@@ -117,7 +117,9 @@ if ($null -eq $port) {
 
 $baseUrl = "http://127.0.0.1:$port"
 $pidFile = Join-Path $logDir "bridge-$port.pid"
-$log = Join-Path $logDir ("bridge-{0:yyyy-MM-dd}-{1}.log" -f (Get-Date), $port)
+# Time in the name: one log per run. With only date and port, the next run on
+# the same port overwrote the previous log (lost a test, 2026-11-10).
+$log = Join-Path $logDir ("bridge-{0:yyyy-MM-dd-HHmmss}-{1}.log" -f (Get-Date), $port)
 
 Write-Host "Syncing Python environment (uv sync --frozen); the first run downloads dependencies"
 & uv sync --frozen --quiet --project $PSScriptRoot
@@ -186,28 +188,18 @@ try {
         CLAUDE_CODE_USE_VERTEX                   = $null
         CLAUDE_CODE_USE_FOUNDRY                  = $null
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1'
+        # Auto mode's server-side check never answers through the bridge, and
+        # an action without a verdict is refused. With 0, Claude Code sends
+        # its own classifier requests instead; they go through the bridge to
+        # the small model like any other call (verified 2026-11-10).
+        CLAUDE_CODE_AUTO_MODE_SERVER             = '0'
+        # claude.ai connectors cannot load with an API key set; this stops
+        # Claude Code warning about it at every start (2.1.321).
+        ENABLE_CLAUDEAI_MCP_SERVERS              = 'false'
     }
     foreach ($name in $vars.Keys) {
         $saved[$name] = [Environment]::GetEnvironmentVariable($name)
         [Environment]::SetEnvironmentVariable($name, $vars[$name])
-    }
-
-    # Auto mode's safety check runs on Anthropic's servers and never answers
-    # through the bridge: every action it would judge is refused, without a
-    # prompt (2026-11-10). A settings.json defaultMode of "auto" would put
-    # every session there, so pick a mode unless the caller did.
-    $modeGiven = $false
-    foreach ($a in $ClaudeArgs) {
-        if ($a -like '--permission-mode*' -or $a -eq '--dangerously-skip-permissions') {
-            $modeGiven = $true
-        }
-    }
-    if (-not $modeGiven) {
-        Write-Host "Using --permission-mode acceptEdits: auto mode cannot work through the bridge"
-        $ClaudeArgs = @('--permission-mode', 'acceptEdits') + $ClaudeArgs
-    }
-    if (($ClaudeArgs -join ' ') -match '--permission-mode[ =]auto') {
-        Write-Host "Warning: auto mode refuses every action its server-side check would judge; nothing answers that check through the bridge"
     }
 
     Write-Host "Starting claude on Copilot model $BridgeModel via $baseUrl"

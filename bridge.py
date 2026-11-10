@@ -631,8 +631,15 @@ def messages_endpoint():
                      + [{"type": "tool_use", "id": cid} for cid, _, _ in tool_uses]}
         conv.sigs = conv.sigs + [message_signature(assistant)]
         conv.loose_sigs = conv.loose_sigs + [message_signature(assistant, user_text=False)]
-        log.info("%s: done %s in %.1fs, in=%d out=%d cache_read=%d",
-                 conv.id, stop, time.monotonic() - t0, usage[0], usage[1], usage[2])
+        log.info("%s: done %s in %.1fs, in=%d out=%d cache_read=%d cache_write=%d",
+                 conv.id, stop, time.monotonic() - t0, usage[0], usage[1], usage[2], usage[3])
+        if not body.get("tools") and stop == "end_turn":
+            # Side calls with no tools (auto mode's classifier, titles) are
+            # one-shot. Left open, every classifier check kept a Copilot
+            # session alive for the life of the bridge (2026-11-10).
+            conv.close("one-shot request without tools")
+            with CONV_LOCK:
+                CONVERSATIONS.pop(conv.id, None)
         yield ("end", (stop, usage))
 
     if not stream:
@@ -646,13 +653,31 @@ def messages_endpoint():
             elif kind == "end":
                 stop, usage = payload
         body_text = "".join(text).strip()
+        # Copilot has no stop sequences, so cut afterwards. Auto mode's
+        # classifier asks for <severity>N</severity> with "</severity>" as the
+        # stop sequence; Anthropic returns the text before it.
+        stop_sequence = None
+        for seq in body.get("stop_sequences") or []:
+            at = body_text.find(seq)
+            if at < 0:
+                continue
+            if stop_sequence is None or at < body_text.find(stop_sequence):
+                stop_sequence = seq
+        if stop_sequence is not None:
+            body_text = body_text[:body_text.find(stop_sequence)]
+            stop = "stop_sequence"
+            log.info("%s: cut the reply at stop sequence %r", conv.id, stop_sequence)
         if body_text:
             content.insert(0, {"type": "text", "text": body_text})
         return jsonify({"id": msg_id, "type": "message", "role": "assistant", "model": conv.model,
-                        "content": content, "stop_reason": stop, "stop_sequence": None,
+                        "content": content, "stop_reason": stop, "stop_sequence": stop_sequence,
                         "usage": {"input_tokens": usage[0], "output_tokens": usage[1],
                                   "cache_read_input_tokens": usage[2],
                                   "cache_creation_input_tokens": usage[3]}})
+
+    if body.get("stop_sequences"):
+        log.warning("%s: stop_sequences %r on a streamed request are not applied; only non-streamed "
+                    "replies are cut", conv.id, body["stop_sequences"])
 
     def generate():
         yield sse("message_start", {"type": "message_start", "message": {
