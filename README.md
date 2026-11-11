@@ -69,7 +69,7 @@ When claude exits it prints `claude --resume <id>`. That goes to Anthropic, not 
 Two environment variables for the bridge:
 
 - `BRIDGE_DUMP_DIR=<dir>` writes every request Claude Code sends as JSON. For debugging. The files hold your prompts and file contents.
-- `BRIDGE_ALLOW_UNVERIFIED=1` lets unverified models through (anything that is not `claude-*` or `gpt-*`). Do not. See Limits for why they are refused.
+- `BRIDGE_ALLOW_UNVERIFIED=1` lets models through that the bridge would refuse. Do not. See Limits for why they are refused.
 
 The launcher also sets two variables for claude:
 
@@ -86,7 +86,7 @@ Each check sends the classifier's own system prompt, about 48,000 tokens. The se
 
 ## Limits
 
-- Only `claude-*` and `gpt-*` models. With Copilot CLI 1.0.73 (what SDK 1.0.8 bundles) the runtime paired parallel tool results on GPT models by answer order, not by call id. Answered in reverse order, gpt-6-luna and gpt-6-sol swapped the results 3 of 3 times. A wrong pairing gives the model another file's contents with no error anywhere, so I refused GPT. I was on an old SDK. On 1.0.30 (CLI 1.0.108) I have not seen a swap: gpt-6-luna 12 of 13 correct, gpt-6-sol 13 of 13, and the odd one was an incomplete answer. GPT is allowed since 2026-11-10, with one headless run with tools on gpt-6-luna behind it. Claude Code does not know the GPT model names and assumes a 200k context window. Other models stay out until the check says ok for them. `check_tool_order.py` re-tests it and can mail you when a verdict changes.
+- Only `claude-*` and `gpt-*` models. With Copilot CLI 1.0.73 (what SDK 1.0.8 bundles) the runtime paired parallel tool results on GPT models by answer order, not by call id. Answered in reverse order, gpt-6-luna and gpt-6-sol swapped the results 3 of 3 times. A wrong pairing gives the model another file's contents with no error anywhere, so I refused GPT. I was on an old SDK. On 1.0.30 (CLI 1.0.108) I have not seen a swap: gpt-6-luna 12 of 13 correct, gpt-6-sol 13 of 13, and the odd one was an incomplete answer. GPT is allowed since 2026-11-10, with one headless run with tools on gpt-6-luna behind it. Claude Code does not know the GPT model names and assumes a 200k context window. Any other model stays out until `check_tool_order.py` has measured it ok on the CLI you run, and a model it measures broken is refused whatever its name. `check_tool_order.py` re-tests it and can mail you when a verdict changes.
 - The bridge binds to loopback only. It hands out commands that run on your machine - do not put it on a network. The launcher makes a random token per run and the bridge refuses requests without it, so other local programs and web pages that post to 127.0.0.1 get a 401. Before 2026-11-10 there was no token.
 - Esc in the middle of a turn, `/compact` and rewind end up on a fallback path: a fresh Copilot session with the earlier conversation flattened to text. That works, but it is lossy, and I have not measured how much worse it is. It also costs more, because the whole history is written to the cache again.
 - Auto mode works only with the client-side classifier, which the launcher turns on. Run `claude` against the bridge some other way and it refuses every action it would check.
@@ -117,14 +117,17 @@ Delete the folder. Everything the bridge makes lives inside it: `.venv`, `logs/`
 
 ```powershell
 uv run check_tool_order.py
+uv run check_tool_order.py --models gpt-6-luna kimi-k3
 uv run check_tool_order.py --mail-script C:\path\to\send-mail.ps1
 ```
 
-It runs the reverse-order probe five times per model and keeps the last verdict per model in `logs/tool-order/state.json`: `ok` (all five paired correctly), `broken` (at least one swap) or `inconclusive` (no swap, but a run gave no usable answer, usually a model that did not make both calls in time). The mail script is any PowerShell script that takes `-Subject` and `-Body` and exits 0. It is only called when a verdict changes.
+It asks the SDK which models your account has, so there is no list to keep up to date. It runs the reverse-order probe five times per model, claude-sonnet-5 first as the control, and keeps the last verdict per model in `logs/tool-order/state.json`: `ok` (all five paired correctly), `broken` (at least one swap) or `inconclusive` (no swap, but a run gave no usable answer, usually a model that did not make both calls in time). The mail script is any PowerShell script that takes `-Subject` and `-Body` and exits 0. It is only called when a verdict changes.
+
+The bridge reads `state.json` when it starts. It only trusts verdicts measured on the Copilot CLI it runs itself, so after an SDK upgrade the old verdicts stop counting until the check has run again. Without a state file the bridge allows `claude-*` and `gpt-*`.
 
 ## Testing
 
-There is one offline test, `tests/test_matching.py`, for how requests are matched to conversations. Everything else below talks to the live Copilot runtime and spends a few AI credits per run.
+There are two offline tests: `tests/test_matching.py` for how requests are matched to conversations, and `tests/test_allowlist.py` for which models are let through. Everything else below talks to the live Copilot runtime and spends a few AI credits per run.
 
 What I have run, on Windows 11 with Copilot SDK 1.0.8 and Claude Code 2.1.319, headless (`claude -p`) unless it says otherwise. On SDK 1.0.30 I have only run the pairing check and a headless run with parallel Reads, Edit and Bash, once on claude-opus-5.5 and once on gpt-6-luna:
 
@@ -144,6 +147,7 @@ Quick checks after a change:
 ```powershell
 uv run python -m py_compile bridge.py probe_tool_order.py check_tool_order.py
 uv run python tests/test_matching.py
+uv run python tests/test_allowlist.py
 uv run probe_tool_order.py claude-sonnet-5 8 reverse
 .\claude-copilot.cmd -p "Read some file and list what is in it. Do not change anything." --allowedTools Read
 ```

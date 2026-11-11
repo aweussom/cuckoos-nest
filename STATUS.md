@@ -11,8 +11,10 @@ client-side classifier, which the launcher turns on.
 The SDK pin is 1.0.30 (CLI 1.0.108) since 2026-11-10; everything dated
 before that was measured on 1.0.8 (CLI 1.0.73). The tool-result pairing
 defect that kept GPT out is in CLI 1.0.73 and was not seen on 1.0.108.
-The allowlist is `claude-` and `gpt-` since 2026-11-10. kimi-k3 measures
-ok but is not on the list.
+Which models the bridge allows comes from measurement since 2026-11-11:
+`check_tool_order.py` probes every model the SDK lists, and the bridge
+allows those measured ok on the CLI it runs. The prefixes `claude-` and
+`gpt-` are the fallback when there is no verdict.
 
 ## Verified
 
@@ -113,10 +115,23 @@ ok but is not on the list.
     came at 3.4 to 4.2 s where logged. So `inconclusive` was the probe's
     clock, not pairing. With the probe waiting for the calls: 10 of 10
     correct.
-  - Last `check_tool_order.py` verdicts [OBSERVED 2026-11-10, CLI 1.0.108]:
-    gpt-6-luna ok, gpt-6-sol ok, kimi-k3 ok, claude-sonnet-5 ok (control).
-    The verdict for "every run correct" is now `ok`; it was `fixed`, which
+  - Last `check_tool_order.py` run [OBSERVED 2026-11-11, SDK 1.0.30, CLI
+    1.0.108]: the SDK listed 14 models; `auto` was skipped, the other 13
+    were each ok 5 of 5: claude-sonnet-5 (control), claude-opus-5.5,
+    claude-opus-5, claude-opus-4.8, claude-opus-4.8-fast, gpt-6-sol,
+    gpt-6-luna, gpt-6-astra, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna,
+    gpt-5.3-codex, kimi-k3. 18 minutes. The current verdicts are in
+    `logs/tool-order/state.json`, not here.
+  - The verdict for "every run correct" is `ok`; it was `fixed`, which
     read wrong for a model that was never broken.
+- Allowlist from verdicts [OBSERVED 2026-11-11]: the bridge logged the 13
+  verdicts for CLI 1.0.108 at startup. Headless `claude-copilot.ps1 -p`
+  runs with two parallel Reads, Edit and Bash answered correctly on
+  gpt-6-sol, gpt-5.3-codex and kimi-k3 (as main and small model), log
+  `fresh` then `resume` x3 or x4. kimi-k3 is outside the prefixes, so it
+  got in on its verdict. `tests/test_allowlist.py` covers the rules
+  offline: ok allows, broken refuses, a verdict from another CLI or
+  without a CLI version does not count.
 - GPT through the bridge after `gpt-` went into the allowlist [OBSERVED
   2026-11-10, gpt-6-luna as main and small model]: one headless
   `claude-copilot.ps1 -p` run with two parallel Reads, Edit and Bash
@@ -236,9 +251,9 @@ ok but is not on the list.
 
 ## Next
 
-1. Owner: decide whether `kimi-` goes into `VERIFIED_MODEL_PREFIXES`. The
-   gate in CLAUDE.md (a `check_tool_order.py` verdict of `ok`) is met on
-   CLI 1.0.108. Nothing has been run on kimi-k3 through the bridge.
+1. After the next SDK bump: run `check_tool_order.py` before anything
+   else. Until then the bridge has no verdicts for the new CLI and falls
+   back to the prefixes, so kimi-k3 is refused and nothing is measured.
 2. Owner: an hour of interactive work through `claude-copilot.ps1`, now on
    SDK 1.0.30.
 3. Reuse the task suite from cloud-and-local-coding-harness (fix, feature,

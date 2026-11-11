@@ -502,7 +502,7 @@ def pick_model(requested):
         return DEFAULT_MODEL
     # Refuse instead of falling back: a silent fallback had Claude Code's
     # status line say "Fable 5.1" while claude-opus-5.5 answered (2026-11-10).
-    usable = sorted(m for m in COPILOT_MODELS if m.startswith(VERIFIED_MODEL_PREFIXES))
+    usable = sorted(m for m in COPILOT_MODELS if pairing_refusal(m) is None)
     raise ValueError(f"model {requested!r} has no Copilot equivalent on this bridge "
                      f"(usable here: {', '.join(usable)}). Pick another model with /model.")
 
@@ -515,19 +515,70 @@ def pick_model(requested):
 # pinned SDK. gpt- went in on 2026-11-10: gpt-6-luna and gpt-6-sol were ok
 # on CLI 1.0.108 (STATUS.md). A downgrade of the SDK pin below CLI 1.0.108
 # must take gpt- out again. BRIDGE_ALLOW_UNVERIFIED=1 lifts this.
+#
+# The prefixes are the fallback. A verdict from check_tool_order.py, measured
+# on the Copilot CLI this bridge runs, comes first: see pairing_refusal().
 VERIFIED_MODEL_PREFIXES = ("claude-", "gpt-")
+
+# model -> "ok" | "broken" | "inconclusive", only verdicts measured on the
+# CLI this SDK bundles. Filled once at startup by load_pairing_verdicts().
+TOOL_ORDER_STATE = Path(__file__).parent / "logs" / "tool-order" / "state.json"
+PAIRING_VERDICTS = {}
+
+
+def load_pairing_verdicts():
+    """Read what check_tool_order.py measured. A verdict from another CLI
+    version says nothing about this one, so it is left out and the prefixes
+    decide for that model."""
+    global PAIRING_VERDICTS
+    if not TOOL_ORDER_STATE.exists():
+        log.info("no %s: the allowlist is the prefixes %s. check_tool_order.py measures every "
+                 "model the account has", TOOL_ORDER_STATE, VERIFIED_MODEL_PREFIXES)
+        return
+    from copilot._cli_version import CLI_VERSION
+    log.info("reading pairing verdicts from %s, keeping those measured on CLI %s",
+             TOOL_ORDER_STATE, CLI_VERSION)
+    state = json.loads(TOOL_ORDER_STATE.read_text(encoding="utf-8"))
+    verdicts = {}
+    left_out = []
+    for model, entry in state.items():
+        if not isinstance(entry, dict):
+            # Written before 2026-11-11: a bare verdict, no CLI version on it.
+            left_out.append(f"{model} (no CLI version)")
+            continue
+        if entry.get("cli") != CLI_VERSION:
+            left_out.append(f"{model} (CLI {entry.get('cli')})")
+            continue
+        verdicts[model] = entry["verdict"]
+    PAIRING_VERDICTS = verdicts
+    log.info("pairing verdicts for CLI %s: %s; left out: %s", CLI_VERSION, verdicts, left_out or "none")
+
+
+def pairing_refusal(model):
+    """None when the model may be used, else why not."""
+    verdict = PAIRING_VERDICTS.get(model)
+    if verdict == "ok":
+        return None
+    if verdict == "broken":
+        return ("check_tool_order.py measured it broken on this Copilot CLI: parallel tool "
+                "results were swapped")
+    # Not measured on this CLI, or inconclusive: the prefixes decide.
+    if model.startswith(VERIFIED_MODEL_PREFIXES):
+        return None
+    return (f"its tool results are not verified to pair by id in the Copilot runtime "
+            f"(no ok verdict from check_tool_order.py on this CLI, and not one of "
+            f"{', '.join(VERIFIED_MODEL_PREFIXES)}*)")
 
 
 def require_verified(model):
-    if model.startswith(VERIFIED_MODEL_PREFIXES):
+    reason = pairing_refusal(model)
+    if reason is None:
         return
     if os.environ.get("BRIDGE_ALLOW_UNVERIFIED") == "1":
-        log.warning("model %s is not verified for tool-result pairing; allowed by "
-                    "BRIDGE_ALLOW_UNVERIFIED=1", model)
+        log.warning("model %s would be refused (%s); allowed by BRIDGE_ALLOW_UNVERIFIED=1", model, reason)
         return
-    raise ValueError(f"model {model!r} is refused: its tool results are not verified to pair "
-                     f"by id in the Copilot runtime (allowed: {', '.join(VERIFIED_MODEL_PREFIXES)}*; "
-                     f"see check_tool_order.py, or set BRIDGE_ALLOW_UNVERIFIED=1)")
+    raise ValueError(f"model {model!r} is refused: {reason}. Run check_tool_order.py, "
+                     f"or set BRIDGE_ALLOW_UNVERIFIED=1")
 
 
 # Sent ahead of the user's message when the Copilot session holds one exchange
@@ -879,6 +930,7 @@ def main():
                          "set BRIDGE_TOKEN=<random> here and ANTHROPIC_AUTH_TOKEN=<same> for claude "
                          "(claude-copilot.ps1 does both)")
     DEFAULT_MODEL, SMALL_MODEL = args.model, args.small_model
+    load_pairing_verdicts()
     for name in (DEFAULT_MODEL, SMALL_MODEL):
         try:
             require_verified(name)

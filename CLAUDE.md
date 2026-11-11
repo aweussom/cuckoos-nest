@@ -21,12 +21,16 @@ the measurements.
   harness runs on this machine. `--host` refuses anything but loopback, and
   the bridge refuses to start without `BRIDGE_TOKEN` and answers 401 to any
   request without it. Do not add a LAN option or a no-token mode.
-- **Verified models only.** `VERIFIED_MODEL_PREFIXES` in `bridge.py` is the
-  allowlist (`claude-` and `gpt-` today). Copilot CLI 1.0.73 paired parallel tool
-  results by answer order on GPT models; a wrong pairing gives the model
-  another file's contents with no error anywhere. Widen the list only on a
-  `check_tool_order.py` verdict of `ok`, measured on the pinned SDK. A pin
-  below CLI 1.0.108 takes `gpt-` out again.
+- **Verified models only.** Copilot CLI 1.0.73 paired parallel tool results
+  by answer order on GPT models; a wrong pairing gives the model another
+  file's contents with no error anywhere. `pairing_refusal()` in `bridge.py`
+  decides, in this order: a `check_tool_order.py` verdict measured on the
+  CLI the bridge runs (`ok` allows, `broken` refuses), then
+  `VERIFIED_MODEL_PREFIXES` (`claude-` and `gpt-` today). Do not add a
+  prefix to let a model in; run the check. A pin below CLI 1.0.108 takes
+  `gpt-` out again.
+- **The check takes its models from the SDK.** `check_tool_order.py` has
+  no model list of its own. Do not give it one; `--models` is for a rerun.
 - **A claim about the Copilot runtime carries the CLI version.** Before
   calling something a runtime defect, rerun on the latest SDK release.
   `TODONT.md` has what happened otherwise.
@@ -47,12 +51,14 @@ the measurements.
 uv sync --frozen
 uv run python -m py_compile bridge.py probe_tool_order.py check_tool_order.py
 uv run python tests/test_matching.py                   # offline, no credits
+uv run python tests/test_allowlist.py                  # offline, no credits
 uv run probe_tool_order.py claude-sonnet-5 8 reverse   # live, a few Copilot credits
 .\claude-copilot.ps1 -p "Reply with the single word READY."
 ```
 
-`tests/test_matching.py` is the only offline test: conversation matching
-with fake conversations. Every other check above talks to the live Copilot
+`tests/test_matching.py` (conversation matching with fake conversations)
+and `tests/test_allowlist.py` (verdicts against prefixes) are the offline
+tests. Every other check above talks to the live Copilot
 runtime and spends AI credits. A change to `bridge.py` is validated by a
 `claude-copilot.ps1 -p` run that uses tools (Read, Edit, Bash), then checking
 `logs/bridge-<date>-<time>-<port>.log` for `fresh` / `resume` / `continue`.
