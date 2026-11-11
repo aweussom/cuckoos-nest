@@ -8,11 +8,15 @@ Checks, against the live Copilot runtime (uses AI credits, keep it short):
   3. parallel tool calls: how many requests arrive before the turn parks
   4. how long a pending call may wait (DELAY_S) before the runtime gives up
 
+The probe waits up to CALLS_WAIT_S for the model's calls, then holds the
+parked turn for delay_s before it answers.
+
 Usage: uv run probe_tool_order.py [model] [delay_s] [events|msg|reverse]
 """
 import asyncio
 import json
 import logging
+import os
 import sys
 import time
 
@@ -33,6 +37,8 @@ MODEL = sys.argv[1] if len(sys.argv) > 1 else None
 DELAY_S = float(sys.argv[2]) if len(sys.argv) > 2 else 2.0
 # msg = answer in the order of assistant.message tool_requests, reverse = opposite
 ORDER = sys.argv[3] if len(sys.argv) > 3 else "events"
+# How long the model gets to make its tool calls before the run is given up.
+CALLS_WAIT_S = 60.0
 
 FILES = {"a.txt": "alpha-7731", "b.txt": "bravo-4410"}
 
@@ -99,7 +105,8 @@ async def main():
         available_tools=ToolSet().add_custom("*"),
         system_message={"mode": "replace", "content": SYSTEM},
         streaming=True,
-        working_directory=".",
+        # SDK 1.0.30 refuses a relative path ("Directory path must be absolute").
+        working_directory=os.getcwd(),
         skip_custom_instructions=True,
         enable_skills=False,
     )
@@ -114,11 +121,36 @@ async def main():
     t0 = time.monotonic()
     await session.send("What do a.txt and b.txt contain? Answer exactly in the form \"a.txt: <value>\" and \"b.txt: <value>\" on two lines.")
 
-    # Let the turn reach the park point, then hold it for DELAY_S.
+    # Wait for the calls themselves, not for a clock. kimi-k3 took 8.8 s to
+    # make its two calls once; a fixed 8 s sleep then answered nothing and
+    # the run died in the 180 s timeout below (TODONT.md, 2026-11-10).
+    waited_s = 0.0
+    while waited_s < CALLS_WAIT_S:
+        if done.is_set():
+            break
+        if msg_order and len(pending) >= len(msg_order):
+            break
+        await asyncio.sleep(0.25)
+        waited_s += 0.25
+    log.info("calls arrived after %.1fs (limit %.0fs): %d requested in the assistant message, %d pending",
+             waited_s, CALLS_WAIT_S, len(msg_order), len(pending))
+
+    log.info("holding the parked turn for %.0fs, expecting it to stay parked", DELAY_S)
     await asyncio.sleep(DELAY_S)
     log.info("after %.0fs: %d pending call(s), idle=%s", DELAY_S, len(pending), done.is_set())
     if done.is_set():
         log.error("turn ended before we answered: runtime did NOT park on declaration-only tools")
+
+    if len(pending) < 2:
+        # One call, or none: there is no order to reverse, so this run says
+        # nothing about pairing. Say so instead of printing "MAPPING: ok".
+        log.error("expected 2 parallel Read calls, got %d within %.0fs: nothing to reorder",
+                  len(pending), CALLS_WAIT_S)
+        log.info("MAPPING: untested")
+        log.info("RESULT: FAIL, the model did not make two parallel calls")
+        await session.disconnect()
+        await client.stop()
+        return
 
     answer = list(pending)
     if ORDER in ("msg", "reverse"):

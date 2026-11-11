@@ -21,6 +21,46 @@ reverse order, 3 of 3 [OBSERVED 2026-11-09, CLI 1.0.73]. Answer in the
 model's order, sequentially. GPT stays refused anyway, because nothing tells
 you when a pairing went wrong.
 
+On CLI 1.0.108 (SDK 1.0.30) no reverse-order run swapped: gpt-6-luna 12 of
+13 correct, gpt-6-sol 13 of 13 [OBSERVED 2026-11-10]. The same day CLI
+1.0.73 still swapped gpt-6-luna 2 of 2. Keep answering in the model's
+order anyway: it costs nothing, and the next CLI may break it again.
+
+## Calling it a Copilot defect without checking the pin
+
+The swap was measured on SDK 1.0.8, which bundles CLI 1.0.73. 1.0.30
+(CLI 1.0.108) was already on PyPI. Every document here then said "the
+Copilot runtime pairs GPT results by answer order", with no version on it,
+and an upstream issue was about to be drafted before anyone looked at the
+latest release [OBSERVED 2026-11-10]. A few runs on 1.0.30 showed no swap.
+Before blaming a dependency for a defect, or reporting it, rerun on its
+latest release. And a claim about someone else's runtime carries the
+version it was measured on.
+
+## A fixed sleep before answering in the probe
+
+`probe_tool_order.py` sleeps `delay_s` (8 in the weekly check), then
+answers whatever calls are pending. kimi-k3 had made no tool call after
+8 s in 1 of 10 runs [OBSERVED 2026-11-10, CLI 1.0.108]; on 2026-11-09 two
+of its runs did not have both calls. The probe then answers nothing, waits
+180 s and reports FAIL, and the model's verdict is `inconclusive` although
+nothing was learned about pairing. It also printed `MAPPING: ok` for a run
+that had reordered nothing.
+
+Six more runs with the old probe caught it: five had both calls at 3.4 to
+4.2 s, the sixth at 8.8 s, 0.8 s after the probe had looked [OBSERVED
+2026-11-10]. The probe now waits up to 60 s for the calls, then holds the
+park for `delay_s`, and a run with fewer than two calls says
+`MAPPING: untested` and ends at once. kimi-k3 after that: 10 of 10
+correct. A verdict of `inconclusive` is a question about the probe first.
+
+## `fixed` as the verdict for "every run correct"
+
+The first mail said claude-sonnet-5 went from (none) to `fixed`. It was
+never broken. The verdict is `ok` now, and a repair reads as broken -> ok
+in the mail's Was/Now columns. The mail also lists each run and says what
+`inconclusive` covers; the first one did neither.
+
 ## Living inside agentry
 
 The bridge started as a branch of agentry. Agentry's `Backend` contract is
@@ -99,6 +139,28 @@ after the first miss: 13, 16, 19 messages, cache_read stuck at 13 961 (the
 system prompt) instead of ~29 000. Now: model via `set_model`, tools via
 `resume_session`, and user-text changes are tolerated when roles, tool ids
 and assistant text match.
+
+## Taking every request on the main history as the conversation
+
+Three minutes after a turn ends, Claude Code sends a request of its own on
+the main history (14:21:54 and 15:02:40 in one TUI hour, 78 output tokens
+each). It is the away recap: "The user stepped away and is coming back.
+Recap in under 40 words" [OBSERVED 2026-11-11, dump]. The bridge matched it as `continue`
+and moved the conversation's history past it. Claude Code does not keep
+that exchange, so the owner's next message matched nothing and went
+`fresh-flattened`: 2 of 14 requests, the first one a 51,166-token cache
+write on Opus [OBSERVED 2026-11-10, SDK 1.0.30, Claude Code 2.1.322]. The
+second also swallowed a `/model` switch.
+
+Not done: giving the side request its own session. It needs the whole
+history, so that is a full cache write every idle pause. Not done either:
+guessing which requests are side requests from their text.
+
+Now the conversation remembers its history from before the last `continue`.
+A request that shows that history again resumes the same session
+(`continue-dropped-last`), and the message is sent with a note telling the
+model to disregard the exchange before it. The way back closes when tool
+results arrive, because then Claude Code kept the turn.
 
 ## Falling back to the default model for unknown ids
 

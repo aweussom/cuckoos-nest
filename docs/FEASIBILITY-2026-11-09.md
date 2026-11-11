@@ -12,6 +12,11 @@ are the ones in this repo.
 
 Versions [OBSERVED 2026-11-09]: github-copilot-sdk 1.0.8, Claude Code 2.1.319.
 
+Correction, 2026-11-10: SDK 1.0.8 bundles Copilot CLI 1.0.73, and it was not
+the latest release when this was written. The pairing defect below is a
+defect of that CLI. On SDK 1.0.30 (CLI 1.0.108) no run swapped. `STATUS.md`
+has the numbers. The rest of this document is left as measured.
+
 ## Mechanism
 
 The Copilot SDK gives an agent session, not completions. Three session
@@ -60,6 +65,7 @@ by request id [OBSERVED]. The bridge answers sequentially in the model's
 order; the loop in `plan_request` carries a comment saying why.
 
 Worth an upstream report to github/copilot-sdk after a minimal repro.
+(2026-11-10: not reported. Already gone in CLI 1.0.108.)
 
 Policy since then: the bridge refuses every model outside
 `VERIFIED_MODEL_PREFIXES` (today `claude-`), at startup and per request.

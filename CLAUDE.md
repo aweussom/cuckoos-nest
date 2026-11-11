@@ -8,7 +8,8 @@ A local bridge that lets Claude Code run on GitHub Copilot models. `bridge.py`
 serves Anthropic's `/v1/messages` and drives Copilot SDK sessions behind it;
 `claude-copilot.ps1` starts one bridge per Claude Code session and tears it
 down afterwards. `probe_tool_order.py` and `check_tool_order.py` watch a
-Copilot runtime defect that decides which models are allowed.
+Copilot runtime defect (seen in CLI 1.0.73, not in 1.0.108) that decides
+which models are allowed.
 
 Read `STATUS.md` first (what is true today) and `TODONT.md` before proposing
 anything structural. `docs/FEASIBILITY-2026-11-09.md` has the mechanism and
@@ -21,10 +22,14 @@ the measurements.
   the bridge refuses to start without `BRIDGE_TOKEN` and answers 401 to any
   request without it. Do not add a LAN option or a no-token mode.
 - **Verified models only.** `VERIFIED_MODEL_PREFIXES` in `bridge.py` is the
-  allowlist (`claude-` today). GPT models pair parallel tool results by answer
-  order in the Copilot runtime; a wrong pairing gives the model another
-  file's contents with no error anywhere. Widen the list only on a
-  `check_tool_order.py` verdict of `fixed`.
+  allowlist (`claude-` and `gpt-` today). Copilot CLI 1.0.73 paired parallel tool
+  results by answer order on GPT models; a wrong pairing gives the model
+  another file's contents with no error anywhere. Widen the list only on a
+  `check_tool_order.py` verdict of `ok`, measured on the pinned SDK. A pin
+  below CLI 1.0.108 takes `gpt-` out again.
+- **A claim about the Copilot runtime carries the CLI version.** Before
+  calling something a runtime defect, rerun on the latest SDK release.
+  `TODONT.md` has what happened otherwise.
 - **Answer parked tool calls in the model's order,** one at a time. The loop
   in `plan_request` says why. Do not parallelise or reorder it.
 - **The launcher has no `param()` block** and never calls `Set-Location`.
@@ -41,14 +46,17 @@ the measurements.
 ```powershell
 uv sync --frozen
 uv run python -m py_compile bridge.py probe_tool_order.py check_tool_order.py
+uv run python tests/test_matching.py                   # offline, no credits
 uv run probe_tool_order.py claude-sonnet-5 8 reverse   # live, a few Copilot credits
 .\claude-copilot.ps1 -p "Reply with the single word READY."
 ```
 
-There are no offline tests yet. Every check above talks to the live Copilot
+`tests/test_matching.py` is the only offline test: conversation matching
+with fake conversations. Every other check above talks to the live Copilot
 runtime and spends AI credits. A change to `bridge.py` is validated by a
 `claude-copilot.ps1 -p` run that uses tools (Read, Edit, Bash), then checking
 `logs/bridge-<date>-<time>-<port>.log` for `fresh` / `resume` / `continue`.
+`fresh-flattened` in the middle of a session is the thing to chase.
 
 ## Writing
 

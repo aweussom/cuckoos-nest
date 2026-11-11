@@ -2,16 +2,21 @@
 answer order instead of request id on GPT models?
 
 bridge.py refuses every model family not listed in its
-VERIFIED_MODEL_PREFIXES because of this defect (2026-11-09: gpt-6-luna swapped
-results 3 of 3 times when answered in reverse order). This runs
-probe_tool_order.py in reverse-answer mode, RUNS times per model, and
-records a verdict per model:
+VERIFIED_MODEL_PREFIXES because of this defect (2026-11-09, CLI 1.0.73:
+gpt-6-luna swapped results 3 of 3 times when answered in reverse order;
+2026-11-10, CLI 1.0.108: no swap seen). This runs probe_tool_order.py in
+reverse-answer mode, RUNS times per model, and records a verdict per model:
 
-  fixed        every run correct            -> candidate for the allowlist
+  ok           every run correct            -> candidate for the allowlist
   broken       at least one swapped run
-  inconclusive no swap seen, but not every run produced a usable answer
+  inconclusive no swap seen, but at least one run gave no usable answer:
+               the model did not make both Read calls in one message (so
+               there was no order to reverse), the final text lacked a
+               value, or the probe timed out
 
-claude-sonnet-5 is the control. If it is not "fixed", the probe itself is
+"ok" is a state, not a change. A repair shows in the mail as broken -> ok.
+
+claude-sonnet-5 is the control. If it is not "ok", the probe itself is
 broken and the run exits 1.
 
 Results: logs/tool-order/history.jsonl (one line per model per run) and
@@ -46,7 +51,7 @@ PROBE = ROOT / "probe_tool_order.py"
 CONTROL = "claude-sonnet-5"
 MODELS = ["gpt-6-luna", "gpt-6-sol", "kimi-k3", CONTROL]
 RUNS = 5
-PARK_S = 8          # the probe waits this long for both tool calls to arrive
+PARK_S = 8          # the probe holds the parked calls this long before answering
 
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
@@ -76,8 +81,12 @@ def run_probe(model):
     if mapping and result and result.group(1) == "PASS":
         log.info("probe on %s: ok", model)
         return "ok"
-    tail = out.strip().splitlines()[-3:]
-    log.warning("probe on %s gave no usable answer (exit %s): %s", model, proc.returncode, tail)
+    # The pending count says whether the model made both calls in one message.
+    pending = re.search(r"\d+ pending call\(s\), idle=\w+", out)
+    final = re.search(r"final text: .*", out)
+    log.warning("probe on %s gave no usable answer (exit %s): %s; %s", model, proc.returncode,
+                pending.group(0) if pending else "no pending-call line",
+                final.group(0)[:200] if final else "no final text")
     return "inconclusive"
 
 
@@ -85,7 +94,7 @@ def verdict(runs):
     if "swapped" in runs:
         return "broken"
     if all(r == "ok" for r in runs):
-        return "fixed"
+        return "ok"
     return "inconclusive"
 
 
@@ -128,12 +137,14 @@ def main():
     log.info("checking %s, %d reverse-order runs each, copilot %s", args.models, RUNS, versions)
 
     current = {}
+    runs_by_model = {}
     for model in args.models:
         runs = []
         for i in range(RUNS):
             runs.append(run_probe(model))
         v = verdict(runs)
         current[model] = v
+        runs_by_model[model] = runs
         log.info("%s: %s (%s)", model, v, runs)
         with HISTORY.open("a", encoding="utf-8") as f:
             f.write(json.dumps({"time": now, "model": model, "verdict": v, "runs": runs,
@@ -143,20 +154,26 @@ def main():
     # Merge: a --models subset must not wipe the other models' verdicts.
     STATE.write_text(json.dumps({**previous, **current}, indent=1), encoding="utf-8")
 
-    control_ok = current.get(CONTROL, "fixed") == "fixed"
+    control_ok = current.get(CONTROL, "ok") == "ok"
     if not control_ok:
         log.error("control model %s is %s: the probe is broken, not only GPT", CONTROL, current[CONTROL])
 
     if changed and not args.mail_script:
         log.warning("verdict changed (%s) but no --mail-script given; not mailed", changed)
     if changed and args.mail_script:
-        rows = "".join(f"<tr><td>{m}</td><td>{old or '(none)'}</td><td>{new}</td></tr>"
-                       for m, (old, new) in changed.items())
+        rows = ""
+        for m, (old, new) in changed.items():
+            runs_text = ", ".join(runs_by_model[m])
+            rows += f"<tr><td>{m}</td><td>{old or '(none)'}</td><td>{new}</td><td>{runs_text}</td></tr>"
         html = (f"<p>Copilot tool-result pairing check, {now}, SDK {versions['sdk']}, "
-                f"CLI {versions['cli']}.</p>"
-                f"<table border='1' cellpadding='4'><tr><th>Model</th><th>Was</th><th>Now</th></tr>{rows}</table>"
-                f"<p>fixed = {RUNS} of {RUNS} reverse-order runs paired correctly. A model that is "
-                f"fixed can go into VERIFIED_MODEL_PREFIXES in bridge.py.</p>"
+                f"CLI {versions['cli']}. Only models whose verdict changed are listed.</p>"
+                f"<table border='1' cellpadding='4'><tr><th>Model</th><th>Was</th><th>Now</th>"
+                f"<th>Runs ({RUNS}, answered in reverse order)</th></tr>{rows}</table>"
+                f"<p>ok = {RUNS} of {RUNS} runs paired correctly. broken = at least one run swapped "
+                f"the results. inconclusive = no swap seen, but at least one run gave no usable "
+                f"answer (the model did not make both calls in one message, the answer lacked a "
+                f"value, or the probe timed out); logs/tool-order/check.log says which.</p>"
+                f"<p>A model that is ok can go into VERIFIED_MODEL_PREFIXES in bridge.py.</p>"
                 + ("" if control_ok else f"<p>Control {CONTROL} failed: the probe itself is broken.</p>"))
         send_mail(args.mail_script, "[cuckoos-nest] Copilot tool-order check: verdict changed", html)
     elif not changed:

@@ -164,6 +164,12 @@ class Conversation:
         self.tool_names = tool_names(tools)
         self.sigs = []              # signatures of messages the session has seen
         self.loose_sigs = []        # the same without user text, see message_signature
+        # The history as it was before the last `continue`, or None. Claude
+        # Code sends side requests on the main history that never enter its
+        # transcript; find_conversation uses this to take the next real
+        # message anyway.
+        self.before_continue_sigs = None
+        self.before_continue_loose = None
         self.events = queue.Queue() # SDK loop thread -> Flask worker
         self.pending = {}           # tool_call_id -> request_id (parked calls)
         self.parked_at = None
@@ -250,25 +256,56 @@ def find_conversation(model, system, tools, sigs, loose_sigs):
     history minus the new last message. Second choice: the same history
     where only the text of earlier user messages changed (Claude Code
     rewrote context it had already sent). The session keeps the old text;
-    losing a re-wrapped reminder beats flattening the whole conversation."""
+    losing a re-wrapped reminder beats flattening the whole conversation.
+
+    Third choice: the request's history is what a conversation had before
+    its last `continue`. Claude Code then never kept that exchange: three
+    minutes after a turn it sent a request of its own on the main history,
+    the bridge took it as `continue`, and the owner's next message was
+    flattened, twice in one session (2026-11-10, TODONT.md). A one-step
+    rewind looks the same from here. The Copilot session still holds the
+    dropped exchange, so plan_request tells the model to disregard it.
+
+    Returns (conv, dropped_last_exchange), or (None, False)."""
     # Model and tools are not part of the match: plan_request switches the
     # model and swaps the tool list on the conversation it gets back.
     want_tools = tool_names(tools)
     with CONV_LOCK:
-        candidates = [c for c in CONVERSATIONS.values()
-                      if not c.closed and c.system == system and len(c.sigs) == len(sigs) - 1]
+        live = [c for c in CONVERSATIONS.values() if not c.closed and c.system == system]
+    candidates = [c for c in live if len(c.sigs) == len(sigs) - 1]
     for conv in candidates:
         if conv.sigs == sigs[:-1]:
-            return conv
+            return conv, False
     for conv in candidates:
         if conv.loose_sigs != loose_sigs[:-1]:
             continue
         changed = [i for i, (a, b) in enumerate(zip(conv.sigs, sigs[:-1])) if a != b]
         log.warning("%s: resuming although the text of earlier user message(s) %s changed; "
                     "the session keeps the text it saw first", conv.id, changed)
-        return conv
+        return conv, False
+    for conv in live:
+        if conv.before_continue_sigs is None:
+            continue
+        same_history = conv.before_continue_sigs == sigs[:-1]
+        same_structure = conv.before_continue_loose == loose_sigs[:-1]
+        if not same_history and not same_structure:
+            continue
+        if conv.pending:
+            log.warning("%s: request matches its history before the last `continue`, but it is "
+                        "parked on tool calls; not resuming it", conv.id)
+            continue
+        if conv.busy.locked():
+            log.warning("%s: request matches its history before the last `continue`, but a turn "
+                        "is still running on it; not resuming it", conv.id)
+            continue
+        log.warning("%s: resuming from before its last `continue`: the request has %d earlier "
+                    "message(s), the session saw %d. The last exchange was a side request or was "
+                    "rewound; the model is told to disregard it%s",
+                    conv.id, len(sigs) - 1, len(conv.sigs),
+                    "" if same_history else " (earlier user text also changed)")
+        return conv, True
     explain_no_match(model, system, want_tools, sigs)
-    return None
+    return None, False
 
 
 def explain_no_match(model, system, want_tools, sigs):
@@ -471,12 +508,14 @@ def pick_model(requested):
 
 
 # Model families whose parallel tool results pair by id in the Copilot
-# runtime. GPT models pair by answer order (docs/FEASIBILITY-2026-11-09.md);
-# the bridge works around it, but a wrong pairing
-# hands the model another file's contents with no error anywhere, so they
-# stay out until check_tool_order.py reports them fixed. kimi-k3 is
-# untested, so it stays out too. BRIDGE_ALLOW_UNVERIFIED=1 lifts this.
-VERIFIED_MODEL_PREFIXES = ("claude-",)
+# runtime. On CLI 1.0.73 GPT models paired by answer order
+# (docs/FEASIBILITY-2026-11-09.md); the bridge works around it, but a wrong
+# pairing hands the model another file's contents with no error anywhere,
+# so a family stays out until check_tool_order.py reports it ok on the
+# pinned SDK. gpt- went in on 2026-11-10: gpt-6-luna and gpt-6-sol were ok
+# on CLI 1.0.108 (STATUS.md). A downgrade of the SDK pin below CLI 1.0.108
+# must take gpt- out again. BRIDGE_ALLOW_UNVERIFIED=1 lifts this.
+VERIFIED_MODEL_PREFIXES = ("claude-", "gpt-")
 
 
 def require_verified(model):
@@ -489,6 +528,14 @@ def require_verified(model):
     raise ValueError(f"model {model!r} is refused: its tool results are not verified to pair "
                      f"by id in the Copilot runtime (allowed: {', '.join(VERIFIED_MODEL_PREFIXES)}*; "
                      f"see check_tool_order.py, or set BRIDGE_ALLOW_UNVERIFIED=1)")
+
+
+# Sent ahead of the user's message when the Copilot session holds one exchange
+# that Claude Code's transcript does not (find_conversation, third choice).
+DROPPED_EXCHANGE_NOTE = (
+    "<system-message>\nThe previous exchange in this session (the last user message before this "
+    "one, and your reply to it) is not part of the conversation: it was a side request from the "
+    "client, or the user took it back. Disregard it and do not refer to it.\n</system-message>\n\n")
 
 
 def plan_request(body):
@@ -510,7 +557,7 @@ def plan_request(body):
     loose_sigs = [message_signature(m, user_text=False) for m in messages]
     last = messages[-1]
 
-    conv = find_conversation(model, system, tools, sigs, loose_sigs)
+    conv, dropped_last_exchange = find_conversation(model, system, tools, sigs, loose_sigs)
     if conv and conv.model != model:
         conv.switch_model(model)
     if conv and conv.tool_names != tool_names(tools):
@@ -539,6 +586,9 @@ def plan_request(body):
                 conv.pending = {}
             conv.sigs = sigs
             conv.loose_sigs = loose_sigs
+            # Tool results mean Claude Code kept this turn: no way back past it.
+            conv.before_continue_sigs = None
+            conv.before_continue_loose = None
             return conv, start, "resume"
         log.warning("%s: parked on %s but call carries results for %s; abandoning it",
                     conv.id, sorted(conv.pending), sorted(results))
@@ -547,12 +597,20 @@ def plan_request(body):
 
     if conv and not conv.pending:
         text = user_text(last)
+        path = "continue"
+        if dropped_last_exchange:
+            text = DROPPED_EXCHANGE_NOTE + text
+            path = "continue-dropped-last"
+        # What Claude Code holds before this message. If the next request
+        # shows the same history again, this one was a side request.
+        conv.before_continue_sigs = sigs[:-1]
+        conv.before_continue_loose = loose_sigs[:-1]
         conv.sigs = sigs
         conv.loose_sigs = loose_sigs
 
         def start():
             run_async(conv.session.send(text), timeout=30)
-        return conv, start, "continue"
+        return conv, start, path
 
     # Fresh session. Seed earlier history as text when there is any.
     if last["role"] != "user":

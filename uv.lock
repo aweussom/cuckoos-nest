@@ -63,7 +63,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "flask", specifier = ">=3.1" },
-    { name = "github-copilot-sdk", specifier = "==1.0.8" },
+    { name = "github-copilot-sdk", specifier = "==1.0.30" },
 ]
 
 [[package]]
@@ -85,7 +85,7 @@ wheels = [
 
 [[package]]
 name = "github-copilot-sdk"
-version = "1.0.8"
+version = "1.0.30"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -93,7 +93,7 @@ dependencies = [
     { name = "python-dateutil" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3e/d2/517ae4be0dbbb02d5546f48e4be59f0ac2d83752cd608da739c5c580942f/github_copilot_sdk-1.0.8-py3-none-any.whl", hash = "sha256:7c3d868b73daa3a154ae6c1c5a2bd9301c47349c6b080f1ed77ba9027da3e0fa", size = 429721, upload-time = "2026-07-22T23:14:47.571Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/df/5054eb8b21d5040ae2207cd78496545e50b7634faab584ae79cfc8f519e8/github_copilot_sdk-1.0.30-py3-none-any.whl", hash = "sha256:277693fc813dc41c2cdae04362732454d1369c92df5336f2c431a11719748227", size = 1045178, upload-time = "2026-11-09T16:30:03.448Z" },
 ]
 
 [[package]]

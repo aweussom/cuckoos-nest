@@ -6,9 +6,11 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
-    # Pinned: the bridge leans on external-tool parking and session options
-    # that were validated on exactly this version (docs/FEASIBILITY-2026-11-09.md).
-    "github-copilot-sdk==1.0.8",
+    # Pinned: the bridge leans on external-tool parking, session options and
+    # two private modules, validated on exactly this version (STATUS.md).
+    # After a bump: run check_tool_order.py and a claude-copilot.ps1 -p run
+    # that uses tools.
+    "github-copilot-sdk==1.0.30",
     "flask>=3.1",
 ]
 

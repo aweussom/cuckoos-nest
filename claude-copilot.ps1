@@ -17,7 +17,8 @@
 # Code on PATH, and Copilot logged in for this Windows user (`copilot login`,
 # or any Copilot CLI/SDK login on this machine).
 # Spends Copilot AI credits, not Claude subscription quota. Only claude-*
-# models: the bridge refuses GPT (tool-result pairing defect, see the note).
+# and gpt-* models: the bridge refuses everything else (allowlist, see
+# STATUS.md).
 
 # No param() block on purpose. PowerShell binds any unique prefix of a
 # parameter name, and a param block with attributes also brings the common

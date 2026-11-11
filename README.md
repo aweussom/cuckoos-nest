@@ -13,7 +13,7 @@ That starts a bridge on a free localhost port, runs `claude` against it on `clau
 Probably not. Check these first:
 
 1. GitHub's own Copilot CLI. It has gotten a lot better the last six months, and I have no problem at all using it instead of Claude Code. Native client, needs nothing extra.
-2. If you do not like the Copilot CLI, use [opencode](https://opencode.ai). GitHub has officially supported Copilot login in opencode since January 2026: run `opencode auth login`, pick GitHub Copilot, and every Copilot model shows up as `github-copilot/...`. I run opencode 2.2.6 that way. It talks to Copilot directly, not through the SDK this repo uses, so the GPT result-pairing problem below does not apply. Quick test with gpt-6-luna: it paired parallel tool results correctly 3 of 3 times. This is the setup I'd recommend.
+2. If you do not like the Copilot CLI, use [opencode](https://opencode.ai). GitHub has officially supported Copilot login in opencode since January 2026: run `opencode auth login`, pick GitHub Copilot, and every Copilot model shows up as `github-copilot/...`. I run opencode 2.2.6 that way. It talks to Copilot directly, not through the SDK this repo uses, so the pairing problem below never applied to it. Quick test with gpt-6-luna: it paired parallel tool results correctly 3 of 3 times. That's the setup I'd recommend.
 3. This repo is for people who will NOT use the Copilot CLI or opencode, and want Claude Code itself on Copilot models.
 
 ## Why
@@ -69,7 +69,7 @@ When claude exits it prints `claude --resume <id>`. That goes to Anthropic, not 
 Two environment variables for the bridge:
 
 - `BRIDGE_DUMP_DIR=<dir>` writes every request Claude Code sends as JSON. For debugging. The files hold your prompts and file contents.
-- `BRIDGE_ALLOW_UNVERIFIED=1` lets GPT and other unverified models through. Do not. See Limits for why they are refused.
+- `BRIDGE_ALLOW_UNVERIFIED=1` lets unverified models through (anything that is not `claude-*` or `gpt-*`). Do not. See Limits for why they are refused.
 
 The launcher also sets two variables for claude:
 
@@ -86,7 +86,7 @@ Each check sends the classifier's own system prompt, about 48,000 tokens. The se
 
 ## Limits
 
-- Only `claude-*` models. On GPT models the Copilot runtime pairs parallel tool results by answer order, not by call id. Answered in reverse order, gpt-6-luna and gpt-6-sol swapped the results 3 of 3 times. The bridge answers in the model's order, but a wrong pairing gives the model another file's contents with no error anywhere, so GPT is refused until that is fixed. `check_tool_order.py` re-tests it and can mail you when a verdict changes.
+- Only `claude-*` and `gpt-*` models. With Copilot CLI 1.0.73 (what SDK 1.0.8 bundles) the runtime paired parallel tool results on GPT models by answer order, not by call id. Answered in reverse order, gpt-6-luna and gpt-6-sol swapped the results 3 of 3 times. A wrong pairing gives the model another file's contents with no error anywhere, so I refused GPT. I was on an old SDK. On 1.0.30 (CLI 1.0.108) I have not seen a swap: gpt-6-luna 12 of 13 correct, gpt-6-sol 13 of 13, and the odd one was an incomplete answer. GPT is allowed since 2026-11-10, with one headless run with tools on gpt-6-luna behind it. Claude Code does not know the GPT model names and assumes a 200k context window. Other models stay out until the check says ok for them. `check_tool_order.py` re-tests it and can mail you when a verdict changes.
 - The bridge binds to loopback only. It hands out commands that run on your machine - do not put it on a network. The launcher makes a random token per run and the bridge refuses requests without it, so other local programs and web pages that post to 127.0.0.1 get a 401. Before 2026-11-10 there was no token.
 - Esc in the middle of a turn, `/compact` and rewind end up on a fallback path: a fresh Copilot session with the earlier conversation flattened to text. That works, but it is lossy, and I have not measured how much worse it is. It also costs more, because the whole history is written to the cache again.
 - Auto mode works only with the client-side classifier, which the launcher turns on. Run `claude` against the bridge some other way and it refuses every action it would check.
@@ -94,7 +94,7 @@ Each check sends the classifier's own system prompt, about 48,000 tokens. The se
 - I have tested it headless (`claude -p`) with tools, follow-ups and subagents, and in the interactive TUI for a few short sessions with my own `~/.claude` setup (global CLAUDE.md, skills, MCP tools loaded through ToolSearch). Not for an hour of real work yet. My hooks run (a small tab-colour tool on every prompt and tool call); one of them hit its 5 s timeout twice, which I have not tracked down. Actual MCP tool calls are untested.
 - Thinking blocks are not passed through, and reasoning effort is not forwarded.
 - I have not checked whether Copilot's terms cover this use. It is the documented SDK, but driving another vendor's harness is not what the docs describe.
-- Tested on Copilot SDK 1.0.8 (pinned) and Claude Code 2.1.319. Both move fast. :-/
+- Pinned to Copilot SDK 1.0.30 since 2026-11-10. Most of the testing below was on 1.0.8 and Claude Code 2.1.319. Both move fast. :-/
 
 `docs/FEASIBILITY-2026-11-09.md` has the details and the numbers.
 
@@ -113,20 +113,20 @@ Sonnet is half price on everything but cached input, which is what `-BridgeModel
 
 Delete the folder. Everything the bridge makes lives inside it: `.venv`, `logs/`, and `.copilot-runtime/` if you run a Microsoft Store Python. The installer's winget packages (PowerShell 7, uv, Claude Code, the Copilot CLI) are ordinary packages; remove them with `winget uninstall` if you do not want them. The `copilot login` lives in your user profile, not in this folder, and the CLI I have has no logout command.
 
-## Checking the GPT defect
+## Checking tool-result pairing
 
 ```powershell
 uv run check_tool_order.py
 uv run check_tool_order.py --mail-script C:\path\to\send-mail.ps1
 ```
 
-It runs the reverse-order probe five times per model and keeps the last verdict per model in `logs/tool-order/state.json`. The mail script is any PowerShell script that takes `-Subject` and `-Body` and exits 0. It is only called when a verdict changes.
+It runs the reverse-order probe five times per model and keeps the last verdict per model in `logs/tool-order/state.json`: `ok` (all five paired correctly), `broken` (at least one swap) or `inconclusive` (no swap, but a run gave no usable answer, usually a model that did not make both calls in time). The mail script is any PowerShell script that takes `-Subject` and `-Body` and exits 0. It is only called when a verdict changes.
 
 ## Testing
 
-There are no offline tests yet. Everything below talks to the live Copilot runtime and spends a few AI credits per run.
+There is one offline test, `tests/test_matching.py`, for how requests are matched to conversations. Everything else below talks to the live Copilot runtime and spends a few AI credits per run.
 
-What I have run, on Windows 11 with Copilot SDK 1.0.8 and Claude Code 2.1.319, headless (`claude -p`) unless it says otherwise:
+What I have run, on Windows 11 with Copilot SDK 1.0.8 and Claude Code 2.1.319, headless (`claude -p`) unless it says otherwise. On SDK 1.0.30 I have only run the pairing check and a headless run with parallel Reads, Edit and Bash, once on claude-opus-5.5 and once on gpt-6-luna:
 
 - A bug fix in a small repo: Bash, two parallel Reads, Edit, Bash again. Passed, on gpt-6-luna, before GPT was refused. Not re-run on a Claude model.
 - A new function with tests on claude-opus-5.5, then a follow-up with `-c` that stayed on the same Copilot session. Passed.
@@ -143,11 +143,12 @@ Quick checks after a change:
 
 ```powershell
 uv run python -m py_compile bridge.py probe_tool_order.py check_tool_order.py
+uv run python tests/test_matching.py
 uv run probe_tool_order.py claude-sonnet-5 8 reverse
 .\claude-copilot.cmd -p "Read some file and list what is in it. Do not change anything." --allowedTools Read
 ```
 
-The bridge log, `logs/bridge-<date>-<time>-<port>.log`, says which path each request took. `fresh` is a new conversation, `resume` is tool results going back into a parked turn, and `continue` is a new user message on a live session. `fresh-flattened` in the middle of a session means it fell back to the lossy path.
+The bridge log, `logs/bridge-<date>-<time>-<port>.log`, says which path each request took. `fresh` is a new conversation, `resume` is tool results going back into a parked turn, and `continue` is a new user message on a live session. `continue-dropped-last` is the same, after Claude Code sent a request of its own that it did not keep (it does that three minutes after a turn); the model is told to disregard that exchange. `fresh-flattened` in the middle of a session means it fell back to the lossy path.
 
 ### Clean-machine test in Windows Sandbox
 
