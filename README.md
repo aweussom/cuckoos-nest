@@ -50,15 +50,15 @@ From the project you want to work on:
 
 ```powershell
 C:\cuckoos-nest\claude-copilot.cmd                                # interactive, claude-opus-5.5
-C:\cuckoos-nest\claude-copilot.cmd -BridgeModel claude-sonnet-5   # cheaper main model
-C:\cuckoos-nest\claude-copilot.cmd -BridgeSmallModel claude-sonnet-5  # model for Sonnet, Haiku and background calls
+C:\cuckoos-nest\claude-copilot.cmd -BridgeModel claude-sonnet-5.5   # cheaper main model
+C:\cuckoos-nest\claude-copilot.cmd -BridgeSmallModel claude-sonnet-5.5  # model for Sonnet, Haiku and background calls
 C:\cuckoos-nest\claude-copilot.cmd -BridgePort 8800               # first port to try (default 8790)
 C:\cuckoos-nest\claude-copilot.cmd -c                             # anything else goes to claude unchanged
 C:\cuckoos-nest\claude-copilot.cmd -p "fix the failing test"
 C:\cuckoos-nest\claude-copilot.cmd -BridgeStop                    # kill bridges left behind by a closed window
 ```
 
-Claude Code asks for Anthropic model ids. The bridge maps them: Opus to `-BridgeModel`, Sonnet and Haiku (and with them most subagents) to `-BridgeSmallModel`, which defaults to `claude-sonnet-5`. A model with no Copilot match, Fable for instance, gets a 400 that says so. Before 2026-11-10 it quietly got the default model, and the status line said Fable while Opus answered.
+Claude Code asks for Anthropic model ids. The bridge maps them: Opus to `-BridgeModel`, Sonnet and Haiku (and with them most subagents) to `-BridgeSmallModel`, which defaults to `claude-sonnet-5.5`. A model with no Copilot match, Fable for instance, gets a 400 that says so. Before 2026-11-10 it quietly got the default model, and the status line said Fable while Opus answered.
 
 `claude-copilot.cmd` runs `claude-copilot.ps1` with execution policy bypassed, so it also works from cmd and on machines where downloaded scripts are blocked. From PowerShell 7 you can call the `.ps1` directly.
 
@@ -78,7 +78,7 @@ The launcher also sets two variables for claude:
 
 ### Auto mode
 
-Auto mode has a separate classifier model that judges actions before they run. By default Claude Code asks Anthropic's server to do that inside the normal model requests. Through the bridge nothing answers, and an action without a verdict is refused, without asking you. With `CLAUDE_CODE_AUTO_MODE_SERVER=0` Claude Code sends its own classifier requests instead. They go through the bridge to the small model, claude-sonnet-5, like any other call.
+Auto mode has a separate classifier model that judges actions before they run. By default Claude Code asks Anthropic's server to do that inside the normal model requests. Through the bridge nothing answers, and an action without a verdict is refused, without asking you. With `CLAUDE_CODE_AUTO_MODE_SERVER=0` Claude Code sends its own classifier requests instead. They go through the bridge to the small model, claude-sonnet-5.5, like any other call.
 
 I have tested that headless: `curl` to example.com, a POST of the README to httpbin and a push to a temporary branch were allowed, a force push was stopped by a deny rule in my settings. I have not seen the classifier itself block something through the bridge. One push-delete was blocked in a session on Anthropic's API and allowed through the bridge, but the second prompt asked for the delete outright, so that says little.
 
@@ -100,14 +100,14 @@ Each check sends the classifier's own system prompt, about 48,000 tokens. The se
 
 ## Cost
 
-Copilot bills per token in AI credits, 1 credit = $0.01. From [GitHub's pricing page](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing), read 2026-11-10, per million tokens:
+Copilot bills per token in AI credits, 1 credit = $0.01. From [GitHub's pricing page](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing), read 2026-11-26, per million tokens:
 
 | Model | Input | Cached input | Cache write | Output |
 |---|---|---|---|---|
 | claude-opus-5.5 | $4.00 | $0.20 | $5.00 | $20.00 |
-| claude-sonnet-5 | $2.00 | $0.20 | $2.50 | $10.00 |
+| claude-sonnet-5.5 | $2.00 | $0.10 | $2.50 | $10.00 |
 
-Sonnet is half price on everything but cached input, which is what `-BridgeModel claude-sonnet-5` is for. A cache read is a twentieth of fresh input on Opus, so a session that stays on one Copilot session is a lot cheaper than one that keeps falling back. The page does not say which plans include which models; check your own model list. Prices change, so check the page before you trust the table.
+Sonnet is half price on everything, which is what `-BridgeModel claude-sonnet-5.5` is for. A cache read is a twentieth of fresh input on Opus, so a session that stays on one Copilot session is a lot cheaper than one that keeps falling back. The page does not say which plans include which models; check your own model list. Prices change, so check the page before you trust the table.
 
 ## Uninstall
 
@@ -121,7 +121,7 @@ uv run check_tool_order.py --models gpt-6-luna kimi-k3
 uv run check_tool_order.py --mail-script C:\path\to\send-mail.ps1
 ```
 
-It asks the SDK which models your account has, so there is no list to keep up to date. It runs the reverse-order probe five times per model, claude-sonnet-5 first as the control, and keeps the last verdict per model in `logs/tool-order/state.json`: `ok` (all five paired correctly), `broken` (at least one swap) or `inconclusive` (no swap, but a run gave no usable answer, usually a model that did not make both calls in time). The mail script is any PowerShell script that takes `-Subject` and `-Body` and exits 0. It is only called when a verdict changes.
+It asks the SDK which models your account has, so there is no list to keep up to date. It runs the reverse-order probe five times per model, claude-sonnet-5.5 first as the control, and keeps the last verdict per model in `logs/tool-order/state.json`: `ok` (all five paired correctly), `broken` (at least one swap) or `inconclusive` (no swap, but a run gave no usable answer, usually a model that did not make both calls in time). The mail script is any PowerShell script that takes `-Subject` and `-Body` and exits 0. It is only called when a verdict changes.
 
 The bridge reads `state.json` when it starts. It only trusts verdicts measured on the Copilot CLI it runs itself, so after an SDK upgrade the old verdicts stop counting until the check has run again. Without a state file the bridge allows `claude-*` and `gpt-*`.
 
@@ -148,7 +148,7 @@ Quick checks after a change:
 uv run python -m py_compile bridge.py probe_tool_order.py check_tool_order.py
 uv run python tests/test_matching.py
 uv run python tests/test_allowlist.py
-uv run probe_tool_order.py claude-sonnet-5 8 reverse
+uv run probe_tool_order.py claude-sonnet-5.5 8 reverse
 .\claude-copilot.cmd -p "Read some file and list what is in it. Do not change anything." --allowedTools Read
 ```
 

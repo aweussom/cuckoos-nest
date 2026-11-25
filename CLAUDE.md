@@ -52,7 +52,7 @@ uv sync --frozen
 uv run python -m py_compile bridge.py probe_tool_order.py check_tool_order.py
 uv run python tests/test_matching.py                   # offline, no credits
 uv run python tests/test_allowlist.py                  # offline, no credits
-uv run probe_tool_order.py claude-sonnet-5 8 reverse   # live, a few Copilot credits
+uv run probe_tool_order.py claude-sonnet-5.5 8 reverse   # live, a few Copilot credits
 .\claude-copilot.ps1 -p "Reply with the single word READY."
 ```
 

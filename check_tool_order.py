@@ -16,7 +16,7 @@ records a verdict per model:
 
 "ok" is a state, not a change. A repair shows in the mail as broken -> ok.
 
-claude-sonnet-5 is the control and runs first. If it is not "ok", the probe
+claude-sonnet-5.5 is the control and runs first. If it is not "ok", the probe
 itself is broken: nothing else is run, state.json is left alone, exit 1.
 
 Results: logs/tool-order/history.jsonl (one line per model per run) and
@@ -51,7 +51,7 @@ STATE = OUT_DIR / "state.json"
 HISTORY = OUT_DIR / "history.jsonl"
 PROBE = ROOT / "probe_tool_order.py"
 
-CONTROL = "claude-sonnet-5"
+CONTROL = "claude-sonnet-5.5"
 # "auto" lets Copilot pick the model per request, so a verdict for it would
 # describe whatever it picked that minute.
 NOT_A_MODEL = ("auto",)
