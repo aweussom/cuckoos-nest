@@ -163,9 +163,31 @@ def main():
     check("7 a parked conversation is not resumed from before its continue",
           conv is not tool_conv and path == "fresh-flattened", f"{conv.id} {path}")
 
+    log.info("an exact history match whose turn is still running")
+    busy_system = "You are a busy test."
+    busy_conv = FakeConversation("claude-opus-5.5", busy_system, [])
+    busy_history = [user("busy question")]
+    busy_conv.sigs = [bridge.message_signature(m) for m in busy_history]
+    busy_conv.loose_sigs = [bridge.message_signature(m, user_text=False) for m in busy_history]
+    with bridge.CONV_LOCK:
+        bridge.CONVERSATIONS[busy_conv.id] = busy_conv
+    busy_request = busy_history + [user("must not resume")]
+    busy_sigs = [bridge.message_signature(m) for m in busy_request]
+    busy_loose_sigs = [bridge.message_signature(m, user_text=False) for m in busy_request]
+    busy_conv.busy.acquire()
+    try:
+        found, dropped = bridge.find_conversation(
+            "claude-opus-5.5", busy_system, [], busy_sigs, busy_loose_sigs)
+    finally:
+        busy_conv.busy.release()
+        with bridge.CONV_LOCK:
+            bridge.CONVERSATIONS.pop(busy_conv.id, None)
+    check("8 a busy exact match is skipped", found is None and not dropped,
+          f"{getattr(found, 'id', None)} dropped={dropped}")
+
     log.info("a history no conversation has seen")
     conv, path = request([user("unknown"), assistant("unknown answer"), user("more")])
-    check("8 unknown history is flattened into a new conversation",
+    check("9 unknown history is flattened into a new conversation",
           conv is not main_conv and conv is not tool_conv and path == "fresh-flattened", f"{conv.id} {path}")
 
     if FAILED:

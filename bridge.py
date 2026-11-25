@@ -274,10 +274,19 @@ def find_conversation(model, system, tools, sigs, loose_sigs):
         live = [c for c in CONVERSATIONS.values() if not c.closed and c.system == system]
     candidates = [c for c in live if len(c.sigs) == len(sigs) - 1]
     for conv in candidates:
-        if conv.sigs == sigs[:-1]:
-            return conv, False
+        if conv.sigs != sigs[:-1]:
+            continue
+        if conv.busy.locked():
+            log.warning("%s: request matches its exact history, but a turn is still running on it; "
+                        "not resuming it", conv.id)
+            continue
+        return conv, False
     for conv in candidates:
         if conv.loose_sigs != loose_sigs[:-1]:
+            continue
+        if conv.busy.locked():
+            log.warning("%s: request matches its loose history, but a turn is still running on it; "
+                        "not resuming it", conv.id)
             continue
         changed = [i for i, (a, b) in enumerate(zip(conv.sigs, sigs[:-1])) if a != b]
         log.warning("%s: resuming although the text of earlier user message(s) %s changed; "
