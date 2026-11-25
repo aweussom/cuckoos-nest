@@ -3,7 +3,7 @@
 # Background and measurements: docs/FEASIBILITY-2026-11-09.md.
 #
 #   .\claude-copilot.ps1                        # interactive claude on claude-opus-5.5
-#   .\claude-copilot.ps1 -BridgeModel claude-sonnet-5
+#   .\claude-copilot.ps1 -BridgeModel claude-sonnet-5.5
 #   .\claude-copilot.ps1 -c                     # everything else goes to claude as-is
 #   .\claude-copilot.ps1 -p "fix the tests"
 #   .\claude-copilot.ps1 -BridgeStop            # kill bridges orphaned by a closed window
@@ -27,7 +27,7 @@
 # -Bridge* flags are ours, everything else goes to claude untouched.
 $BridgePort = 8790
 $BridgeModel = "claude-opus-5.5"
-$BridgeSmallModel = "claude-sonnet-5"
+$BridgeSmallModel = "claude-sonnet-5.5"
 $BridgeStop = $false
 $ClaudeArgs = @()
 $i = 0

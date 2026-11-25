@@ -502,6 +502,10 @@ def pick_model(requested):
         return requested
     if "haiku" in requested:
         return SMALL_MODEL
+    # Copilot dropped claude-sonnet-5 for claude-sonnet-5.5 [OBSERVED 2026-11-25];
+    # take the newer one first and keep the old name for accounts that still have it.
+    if "sonnet" in requested and "claude-sonnet-5.5" in COPILOT_MODELS:
+        return "claude-sonnet-5.5"
     if "sonnet" in requested and "claude-sonnet-5" in COPILOT_MODELS:
         return "claude-sonnet-5"
     if "opus" in requested and "claude-opus-5.5" in COPILOT_MODELS:
@@ -925,7 +929,7 @@ def main():
     ap.add_argument("--host", default="127.0.0.1",
                     help="loopback only: 127.0.0.1, ::1 or localhost")
     ap.add_argument("--model", default="claude-opus-5.5")
-    ap.add_argument("--small-model", default="claude-sonnet-5",
+    ap.add_argument("--small-model", default="claude-sonnet-5.5",
                     help="for Claude Code's haiku-class calls (titles, summaries)")
     args = ap.parse_args()
     # This endpoint hands out tool calls that Claude Code executes on its own

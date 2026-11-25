@@ -18,3 +18,11 @@ in `TODONT.md`.
    Screenshots: TUI mid-session with a tool call, the bridge log with
    fresh/resume/continue, the installer in Windows Sandbox. Crop the
    Copilot login name.
+
+5. claude-sonnet-5 is gone from Copilot [OBSERVED 2026-11-25; offered:
+   claude-haiku-5.5, claude-opus-5.5, claude-sonnet-5.5, gpt-5.3-codex,
+   gpt-6-luna, gpt-6.1-terra, gpt-6.2-astra, gpt-6.2-sol, kimi-k3]. The
+   launcher and bridge defaults moved to claude-sonnet-5.5. Still on the old
+   name: CONTROL in check_tool_order.py (the check fails until it changes, and
+   claude-sonnet-5.5 needs its own pairing run first), the probe line in
+   CLAUDE.md, README examples and price table.
